@@ -37,27 +37,30 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Protected routes pattern
-  if (request.nextUrl.pathname.startsWith('/dashboard') || 
-      request.nextUrl.pathname.startsWith('/workspace') ||
-      request.nextUrl.pathname.startsWith('/onboarding') ||
-      request.nextUrl.pathname.startsWith('/style-profile')) {
-      
-    if (!user) {
+  const pathname = request.nextUrl.pathname
+
+  // Handle authentication redirects
+  if (!user) {
+    // If user is not authenticated and trying to access protected routes
+    if (pathname.startsWith('/dashboard') || 
+        pathname.startsWith('/workspace') ||
+        pathname.startsWith('/onboarding') ||
+        pathname.startsWith('/style-profile')) {
       return NextResponse.redirect(new URL('/auth', request.url))
     }
+    // Allow access to auth page and other public routes
+    return response
   }
 
-  // Auth page redirect if logged in
-  if (request.nextUrl.pathname === '/auth') {
-    if (user) {
+  // If user is authenticated
+  if (user) {
+    // Redirect away from auth page if already logged in
+    if (pathname === '/auth') {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
-  }
-
-  // Root page handling
-  if (request.nextUrl.pathname === '/') {
-    if (user) {
+    
+    // Handle root page - redirect to dashboard if authenticated
+    if (pathname === '/') {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
   }
