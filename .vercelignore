@@ -5,3 +5,10 @@ dist
 .trae
 .log
 .figma
+.next/
+.next-dev/
+*.sst
+*.blob
+.cache/
+turbopack/
+.vercel

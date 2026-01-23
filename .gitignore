@@ -14,8 +14,8 @@
 /coverage
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
 /build
@@ -47,3 +47,11 @@ next-env.d.ts
 
 # secrets
 lib/services/gcp-key.json
+
+# Build artifacts and cache
+.next/
+.next-dev/
+*.sst
+*.blob
+.cache/
+turbopack/
