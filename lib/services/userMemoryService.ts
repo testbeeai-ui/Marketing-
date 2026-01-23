@@ -2,7 +2,7 @@ import { supabase, isDatabaseAvailable } from '../db/client';
 
 export interface UserMemory {
   id: string;
-  user_id: number;
+  user_id: string; // Changed from number to string to match UUID
   memory_type: string;
   content: string;
   context_metadata?: Record<string, any>;
@@ -49,51 +49,12 @@ export const MEMORY_TYPES = {
 // Storage limits - 36 interactions per type as requested
 const MEMORY_LIMIT = 36;
 
-export const MAX_MEMORIES_PER_TYPE: Record<string, number> = {
-  [MEMORY_TYPES.LIKED_STORY_STYLE_PROFESSIONAL]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_STORY_STYLE_VIRAL]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_STORY_STYLE_STORYTELLER]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_STORY_STYLE_PROFESSIONAL]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_STORY_STYLE_VIRAL]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_STORY_STYLE_STORYTELLER]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_CAPTION_STYLE_LINKEDIN]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_CAPTION_STYLE_TWITTER]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_CAPTION_STYLE_INSTAGRAM]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_CAPTION_STYLE_FACEBOOK]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_CAPTION_STYLE_LINKEDIN]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_CAPTION_STYLE_TWITTER]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_CAPTION_STYLE_INSTAGRAM]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_CAPTION_STYLE_FACEBOOK]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_IMAGE_STYLE]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_IMAGE_STYLE]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_IMAGE_STYLE_LINKEDIN]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_IMAGE_STYLE_TWITTER]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_IMAGE_STYLE_INSTAGRAM]: MEMORY_LIMIT,
-  [MEMORY_TYPES.LIKED_IMAGE_STYLE_FACEBOOK]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_IMAGE_STYLE_LINKEDIN]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_IMAGE_STYLE_TWITTER]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_IMAGE_STYLE_INSTAGRAM]: MEMORY_LIMIT,
-  [MEMORY_TYPES.DISLIKED_IMAGE_STYLE_FACEBOOK]: MEMORY_LIMIT,
-  [MEMORY_TYPES.USER_EDIT_CAPTION]: MEMORY_LIMIT,
-  [MEMORY_TYPES.USER_EDIT_IMAGE_PROMPT]: MEMORY_LIMIT,
-};
-
-// Retrieval limits
-export const DEFAULT_RETRIEVAL_LIMITS: Record<string, number> = {
-  liked_story_style: 15,
-  disliked_story_style: 12,
-  liked_caption_style: 15,
-  disliked_caption_style: 12,
-  liked_image_style: 15,
-  disliked_image_style: 12,
-};
-
 export class UserMemoryService {
   /**
    * Add a memory with automatic cleanup
    */
   async addMemory(
-    userId: number,
+    userId: string, // Changed from number to string
     memoryType: string,
     content: string,
     contextMetadata?: Record<string, any>
@@ -137,25 +98,21 @@ export class UserMemoryService {
       };
     }
 
-    // Check if limit exceeded and cleanup
-    const maxLimit = MAX_MEMORIES_PER_TYPE[memoryType];
-    if (maxLimit) {
-      await this.cleanupOldMemories(userId, memoryType, maxLimit);
+    if (newMemory) {
+      // Clean up old memories for this type
+      await this.cleanupOldMemories(userId, memoryType);
     }
 
-    return newMemory as UserMemory;
+    return newMemory;
   }
 
   /**
-   * Get memories by type with limit
+   * Get memories by type for a user
    */
-  async getMemories(
-    userId: number,
-    memoryType: string,
-    limit: number = 15
-  ): Promise<UserMemory[]> {
+  async getMemoriesByType(userId: string, memoryType: string): Promise<UserMemory[]> {
     if (!isDatabaseAvailable()) {
-      return []; // Return empty array if DB not available
+      console.log(`[UserMemoryService] Database not available, returning empty memories for user ${userId}`);
+      return [];
     }
 
     const { data, error } = await supabase!
@@ -164,136 +121,172 @@ export class UserMemoryService {
       .eq('user_id', userId)
       .eq('memory_type', memoryType)
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(MEMORY_LIMIT);
 
     if (error) {
-      console.error(`Failed to get memories: ${error.message}`);
+      console.warn(`[UserMemoryService] Could not fetch memories: ${error.message}`);
       return [];
     }
 
-    return (data || []) as UserMemory[];
+    return data || [];
   }
 
   /**
-   * Get liked styles (for stories, captions, or images)
+   * Get all memories for a user
    */
-  async getLikedStyles(
-    userId: number,
-    contentType: 'story' | 'caption' | 'image',
-    platform?: string,
-    limit: number = 15
-  ): Promise<UserMemory[]> {
-    let memoryType: string;
-
-    if (contentType === 'story') {
-      // Get all liked story styles
-      const professional = await this.getMemories(userId, MEMORY_TYPES.LIKED_STORY_STYLE_PROFESSIONAL, limit);
-      const viral = await this.getMemories(userId, MEMORY_TYPES.LIKED_STORY_STYLE_VIRAL, limit);
-      const storyteller = await this.getMemories(userId, MEMORY_TYPES.LIKED_STORY_STYLE_STORYTELLER, limit);
-      return [...professional, ...viral, ...storyteller].slice(0, limit);
-    } else if (contentType === 'caption' && platform) {
-      const platformMap: Record<string, string> = {
-        linkedin: MEMORY_TYPES.LIKED_CAPTION_STYLE_LINKEDIN,
-        twitter: MEMORY_TYPES.LIKED_CAPTION_STYLE_TWITTER,
-        instagram: MEMORY_TYPES.LIKED_CAPTION_STYLE_INSTAGRAM,
-        facebook: MEMORY_TYPES.LIKED_CAPTION_STYLE_FACEBOOK,
-      };
-      memoryType = platformMap[platform.toLowerCase()];
-      if (!memoryType) {
-        return [];
-      }
-      return await this.getMemories(userId, memoryType, limit);
-    } else if (contentType === 'image') {
-      return await this.getMemories(userId, MEMORY_TYPES.LIKED_IMAGE_STYLE, limit);
-    }
-
-    return [];
-  }
-
-  /**
-   * Get disliked styles
-   */
-  async getDislikedStyles(
-    userId: number,
-    contentType: 'story' | 'caption' | 'image',
-    platform?: string,
-    limit: number = 12
-  ): Promise<UserMemory[]> {
-    let memoryType: string;
-
-    if (contentType === 'story') {
-      // Get all disliked story styles
-      const professional = await this.getMemories(userId, MEMORY_TYPES.DISLIKED_STORY_STYLE_PROFESSIONAL, limit);
-      const viral = await this.getMemories(userId, MEMORY_TYPES.DISLIKED_STORY_STYLE_VIRAL, limit);
-      const storyteller = await this.getMemories(userId, MEMORY_TYPES.DISLIKED_STORY_STYLE_STORYTELLER, limit);
-      return [...professional, ...viral, ...storyteller].slice(0, limit);
-    } else if (contentType === 'caption' && platform) {
-      const platformMap: Record<string, string> = {
-        linkedin: MEMORY_TYPES.DISLIKED_CAPTION_STYLE_LINKEDIN,
-        twitter: MEMORY_TYPES.DISLIKED_CAPTION_STYLE_TWITTER,
-        instagram: MEMORY_TYPES.DISLIKED_CAPTION_STYLE_INSTAGRAM,
-        facebook: MEMORY_TYPES.DISLIKED_CAPTION_STYLE_FACEBOOK,
-      };
-      memoryType = platformMap[platform.toLowerCase()];
-      if (!memoryType) {
-        return [];
-      }
-      return await this.getMemories(userId, memoryType, limit);
-    } else if (contentType === 'image') {
-      return await this.getMemories(userId, MEMORY_TYPES.DISLIKED_IMAGE_STYLE, limit);
-    }
-
-    return [];
-  }
-
-  /**
-   * Cleanup old memories when limit exceeded
-   */
-  private async cleanupOldMemories(
-    userId: number,
-    memoryType: string,
-    maxLimit: number
-  ): Promise<void> {
+  async getAllMemories(userId: string): Promise<UserMemory[]> {
     if (!isDatabaseAvailable()) {
-      return;
+      console.log(`[UserMemoryService] Database not available, returning empty memories for user ${userId}`);
+      return [];
     }
 
-    // Get all memories of this type, ordered by created_at DESC
-    const { data: allMemories, error: fetchError } = await supabase!
+    const { data, error } = await supabase!
       .from('user_memories')
-      .select('id')
+      .select('*')
       .eq('user_id', userId)
-      .eq('memory_type', memoryType)
       .order('created_at', { ascending: false });
 
-    if (fetchError || !allMemories) {
+    if (error) {
+      console.warn(`[UserMemoryService] Could not fetch memories: ${error.message}`);
+      return [];
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Get memories by multiple types
+   */
+  async getMemoriesByTypes(userId: string, memoryTypes: string[]): Promise<UserMemory[]> {
+    if (!isDatabaseAvailable()) {
+      console.log(`[UserMemoryService] Database not available, returning empty memories for user ${userId}`);
+      return [];
+    }
+
+    const { data, error } = await supabase!
+      .from('user_memories')
+      .select('*')
+      .eq('user_id', userId)
+      .in('memory_type', memoryTypes)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn(`[UserMemoryService] Could not fetch memories: ${error.message}`);
+      return [];
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Delete a specific memory
+   */
+  async deleteMemory(userId: string, memoryId: string): Promise<boolean> {
+    if (!isDatabaseAvailable()) {
+      console.log(`[UserMemoryService] Database not available, cannot delete memory ${memoryId}`);
+      return false;
+    }
+
+    const { error } = await supabase!
+      .from('user_memories')
+      .delete()
+      .eq('id', memoryId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.warn(`[UserMemoryService] Could not delete memory: ${error.message}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Clear all memories for a user
+   */
+  async clearAllMemories(userId: string): Promise<boolean> {
+    if (!isDatabaseAvailable()) {
+      console.log(`[UserMemoryService] Database not available, cannot clear memories for user ${userId}`);
+      return false;
+    }
+
+    const { error } = await supabase!
+      .from('user_memories')
+      .delete()
+      .eq('user_id', userId);
+
+    if (error) {
+      console.warn(`[UserMemoryService] Could not clear memories: ${error.message}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Clean up old memories to stay within the limit
+   */
+  private async cleanupOldMemories(userId: string, memoryType: string): Promise<void> {
+    if (!isDatabaseAvailable()) return;
+
+    // Get current count
+    const { count, error: countError } = await supabase!
+      .from('user_memories')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('memory_type', memoryType);
+
+    if (countError || !count || count <= MEMORY_LIMIT) {
       return;
     }
 
-    // If we have more than maxLimit, delete the oldest ones
-    if (allMemories.length > maxLimit) {
-      const memoriesToDelete = allMemories.slice(maxLimit);
-      const idsToDelete = memoriesToDelete.map(m => m.id);
+    // Delete oldest memories to stay within limit
+    const toDelete = count - MEMORY_LIMIT;
+    
+    const { error: deleteError } = await supabase!
+      .from('user_memories')
+      .delete()
+      .eq('user_id', userId)
+      .eq('memory_type', memoryType)
+      .order('created_at', { ascending: true })
+      .limit(toDelete);
 
-      await supabase!
-        .from('user_memories')
-        .delete()
-        .in('id', idsToDelete);
+    if (deleteError) {
+      console.warn(`[UserMemoryService] Could not cleanup old memories: ${deleteError.message}`);
     }
   }
 
   /**
-   * Delete a memory by ID
+   * Get memory statistics for a user
    */
-  async deleteMemory(memoryId: string): Promise<void> {
+  async getMemoryStats(userId: string): Promise<{
+    total: number;
+    byType: Record<string, number>;
+  }> {
     if (!isDatabaseAvailable()) {
-      return;
+      return { total: 0, byType: {} };
     }
 
-    await supabase!
+    const { data, error } = await supabase!
       .from('user_memories')
-      .delete()
-      .eq('id', memoryId);
+      .select('memory_type')
+      .eq('user_id', userId);
+
+    if (error) {
+      console.warn(`[UserMemoryService] Could not get memory stats: ${error.message}`);
+      return { total: 0, byType: {} };
+    }
+
+    const stats = {
+      total: data?.length || 0,
+      byType: {} as Record<string, number>,
+    };
+
+    data?.forEach(memory => {
+      stats.byType[memory.memory_type] = (stats.byType[memory.memory_type] || 0) + 1;
+    });
+
+    return stats;
   }
 }
 

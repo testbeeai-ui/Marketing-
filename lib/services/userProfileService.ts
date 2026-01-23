@@ -1,7 +1,7 @@
 import { supabase, isDatabaseAvailable } from '../db/client';
 
 export interface UserProfile {
-  user_id: number;
+  user_id: string; // Changed from number to string to match UUID
   username?: string;
   first_name?: string;
   last_name?: string;
@@ -22,7 +22,7 @@ export class UserProfileService {
   /**
    * Get or create user profile
    */
-  async getOrCreateUser(userId: number): Promise<UserProfile> {
+  async getOrCreateUser(userId: string): Promise<UserProfile> {
     if (!isDatabaseAvailable()) {
       // Fallback mode: return a basic profile without database
       console.log(`[UserProfileService] Database not available, using fallback mode for user ${userId}`);
@@ -49,6 +49,9 @@ export class UserProfileService {
       try {
         const newProfile: Partial<UserProfile> = {
           user_id: userId,
+          onboarding_completed: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         };
 
         const { data: createdProfile, error: createError } = await supabase!
@@ -59,7 +62,6 @@ export class UserProfileService {
 
         if (createError) {
           console.warn(`[UserProfileService] Could not create profile: ${createError.message}`);
-          // Return fallback profile
           return {
             user_id: userId,
             onboarding_completed: false,
@@ -67,15 +69,15 @@ export class UserProfileService {
         }
 
         return createdProfile as UserProfile;
-      } catch (insertError) {
-        console.warn(`[UserProfileService] Insert failed, using fallback:`, insertError);
+      } catch (createError) {
+        console.warn(`[UserProfileService] Profile creation failed: ${createError}`);
         return {
           user_id: userId,
           onboarding_completed: false,
         } as UserProfile;
       }
     } catch (error) {
-      console.warn(`[UserProfileService] Error getting profile, using fallback:`, error);
+      console.warn(`[UserProfileService] Profile fetch failed: ${error}`);
       return {
         user_id: userId,
         onboarding_completed: false,
@@ -84,63 +86,84 @@ export class UserProfileService {
   }
 
   /**
-   * Get user profile by ID
+   * Get user profile
    */
-  async getUserProfile(userId: number): Promise<UserProfile | null> {
+  async getUserProfile(userId: string): Promise<UserProfile | null> {
     if (!isDatabaseAvailable()) {
-      // Fallback mode: return null (will trigger onboarding)
+      console.log(`[UserProfileService] Database not available, returning null for user ${userId}`);
       return null;
     }
 
-    const { data, error } = await supabase!
-      .from('user_profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+    try {
+      const { data, error } = await supabase!
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // Not found
+      if (error) {
+        console.warn(`[UserProfileService] Could not fetch profile: ${error.message}`);
         return null;
       }
-      throw new Error(`Failed to get user profile: ${error.message}`);
-    }
 
-    return data as UserProfile;
+      return data as UserProfile;
+    } catch (error) {
+      console.warn(`[UserProfileService] Profile fetch failed: ${error}`);
+      return null;
+    }
   }
 
   /**
    * Update user profile
    */
-  async updateUserProfile(userId: number, updates: Partial<UserProfile>): Promise<UserProfile> {
+  async updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<UserProfile> {
     if (!isDatabaseAvailable()) {
-      // Fallback mode: return updated profile without persisting
-      console.log(`[UserProfileService] Database not available, profile update not persisted for user ${userId}`);
+      console.log(`[UserProfileService] Database not available, returning fallback for user ${userId}`);
       return {
         user_id: userId,
+        onboarding_completed: false,
         ...updates,
       } as UserProfile;
     }
 
-    const { data, error } = await supabase!
-      .from('user_profiles')
-      .update(updates)
-      .eq('user_id', userId)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase!
+        .from('user_profiles')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .select()
+        .single();
 
-    if (error) {
-      throw new Error(`Failed to update user profile: ${error.message}`);
+      if (error) {
+        console.warn(`[UserProfileService] Could not update profile: ${error.message}`);
+        return {
+          user_id: userId,
+          onboarding_completed: false,
+          ...updates,
+        } as UserProfile;
+      }
+
+      return data as UserProfile;
+    } catch (error) {
+      console.warn(`[UserProfileService] Profile update failed: ${error}`);
+      return {
+        user_id: userId,
+        onboarding_completed: false,
+        ...updates,
+      } as UserProfile;
     }
-
-    return data as UserProfile;
   }
 
   /**
-   * Mark onboarding as completed
+   * Complete onboarding for a user
    */
-  async completeOnboarding(userId: number): Promise<void> {
-    await this.updateUserProfile(userId, { onboarding_completed: true });
+  async completeOnboarding(userId: string): Promise<void> {
+    await this.updateUserProfile(userId, {
+      onboarding_completed: true,
+    });
   }
 }
 

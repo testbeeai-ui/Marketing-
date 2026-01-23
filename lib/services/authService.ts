@@ -3,7 +3,7 @@ import { userProfileService } from './userProfileService';
 // Simple session-based authentication
 // In production, you might want to use JWT tokens or Supabase Auth
 interface Session {
-  userId: number;
+  userId: string; // Changed from number to string to match UUID
   createdAt: number;
   expiresAt: number;
 }
@@ -18,7 +18,7 @@ export class AuthService {
   /**
    * Create a session for a user
    */
-  createSession(userId: number): string {
+  createSession(userId: string): string { // Changed from number to string
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const now = Date.now();
 
@@ -37,7 +37,7 @@ export class AuthService {
   /**
    * Get user ID from session
    */
-  getUserIdFromSession(sessionId: string): number | null {
+  getUserIdFromSession(sessionId: string): string | null { // Changed from number to string
     const session = sessions.get(sessionId);
 
     if (!session) {
@@ -76,7 +76,7 @@ export class AuthService {
    * Authenticate user (simple implementation - can be enhanced)
    * For now, we'll auto-create users on first request
    */
-  async authenticateUser(userId: number): Promise<{ sessionId: string; profile: any }> {
+  async authenticateUser(userId: string): Promise<{ sessionId: string; profile: any }> { // Changed from number to string
     // Get or create user profile
     const profile = await userProfileService.getOrCreateUser(userId);
     

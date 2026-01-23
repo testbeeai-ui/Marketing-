@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
             const likedType = `liked_story_style_${style}`;
             const dislikedType = `disliked_story_style_${style}`;
 
-            const liked = await userMemoryService.getMemories(userId, likedType, 10);
-            const disliked = await userMemoryService.getMemories(userId, dislikedType, 10);
+            const liked = await userMemoryService.getMemoriesByType(userId, likedType);
+            const disliked = await userMemoryService.getMemoriesByType(userId, dislikedType);
 
             profile.stories[style] = {
                 liked: liked.map(m => ({
@@ -45,8 +45,8 @@ export async function GET(request: NextRequest) {
             const likedType = `liked_caption_style_${platform}`;
             const dislikedType = `disliked_caption_style_${platform}`;
 
-            const liked = await userMemoryService.getMemories(userId, likedType, 10);
-            const disliked = await userMemoryService.getMemories(userId, dislikedType, 10);
+            const liked = await userMemoryService.getMemoriesByType(userId, likedType);
+            const disliked = await userMemoryService.getMemoriesByType(userId, dislikedType);
 
             profile.captions[platform] = {
                 liked: liked.map(m => ({
@@ -69,8 +69,8 @@ export async function GET(request: NextRequest) {
             const likedType = `liked_image_style_${platform}`;
             const dislikedType = `disliked_image_style_${platform}`;
 
-            const liked = await userMemoryService.getMemories(userId, likedType, 10);
-            const disliked = await userMemoryService.getMemories(userId, dislikedType, 10);
+            const liked = await userMemoryService.getMemoriesByType(userId, likedType);
+            const disliked = await userMemoryService.getMemoriesByType(userId, dislikedType);
 
             profile.images[platform] = {
                 liked: liked.map(m => ({
@@ -89,8 +89,8 @@ export async function GET(request: NextRequest) {
         }
 
         // Get general image preferences
-        const generalLiked = await userMemoryService.getMemories(userId, MEMORY_TYPES.LIKED_IMAGE_STYLE, 10);
-        const generalDisliked = await userMemoryService.getMemories(userId, MEMORY_TYPES.DISLIKED_IMAGE_STYLE, 10);
+        const generalLiked = await userMemoryService.getMemoriesByType(userId, MEMORY_TYPES.LIKED_IMAGE_STYLE);
+        const generalDisliked = await userMemoryService.getMemoriesByType(userId, MEMORY_TYPES.DISLIKED_IMAGE_STYLE);
 
         profile.images.general = {
             liked: generalLiked.map(m => ({

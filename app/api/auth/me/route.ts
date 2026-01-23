@@ -36,10 +36,8 @@ async function verifyAuthToken(request: NextRequest) {
          if (error || !user) {
              return null;
          }
-         const numericUserId = parseInt(user.id.replace(/-/g, '').substring(0, 15), 16) % 2147483647;
          return {
             id: user.id,
-            numericId: numericUserId,
             email: user.email,
         };
     }
@@ -51,11 +49,8 @@ async function verifyAuthToken(request: NextRequest) {
         return null;
     }
 
-    const numericUserId = parseInt(user.id.replace(/-/g, '').substring(0, 15), 16) % 2147483647;
-
     return {
         id: user.id,
-        numericId: numericUserId,
         email: user.email,
     };
 }
@@ -68,32 +63,21 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Authorization token required' }, { status: 401 });
         }
 
-        let profile = await userProfileService.getUserProfile(userInfo.numericId);
+        let profile = await userProfileService.getUserProfile(userInfo.id);
 
         if (!profile) {
-            profile = await userProfileService.getOrCreateUser(userInfo.numericId);
+            profile = await userProfileService.getOrCreateUser(userInfo.id);
         }
 
         return NextResponse.json({
             user: {
                 id: userInfo.id,
                 email: userInfo.email,
-                username: profile.username,
-                firstName: profile.first_name,
-                lastName: profile.last_name,
-                stylePreferences: profile.style_preferences,
-                brandVoice: profile.brand_voice,
-                linkedinVoice: profile.linkedin_voice,
-                twitterVoice: profile.twitter_voice,
-                instagramVoice: profile.instagram_voice,
-                facebookVoice: profile.facebook_voice,
-                onboardingCompleted: profile.onboarding_completed,
-                preferredEmojiUsage: profile.preferred_emoji_usage,
-                preferredFormality: profile.preferred_formality,
             },
+            profile,
         });
     } catch (error: any) {
-        console.error('Error getting user profile:', error);
-        return NextResponse.json({ error: error.message || 'Failed to get user profile' }, { status: 500 });
+        console.error('Error fetching user profile:', error);
+        return NextResponse.json({ error: error.message || 'Failed to fetch user profile' }, { status: 500 });
     }
 }

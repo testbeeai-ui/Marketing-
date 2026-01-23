@@ -1,4 +1,4 @@
-import { userMemoryService, MAX_MEMORIES_PER_TYPE } from './userMemoryService';
+import { userMemoryService } from './userMemoryService';
 
 /**
  * Memory Manager Service
@@ -9,7 +9,7 @@ export class MemoryManager {
    * Cleanup old memories for a user (called automatically by userMemoryService)
    * This is a utility service that can be used for batch operations
    */
-  async cleanupUserMemories(userId: number): Promise<void> {
+  async cleanupUserMemories(userId: string): Promise<void> {
     // The cleanup is already handled in userMemoryService.addMemory()
     // This method can be used for manual cleanup or batch operations
     console.log(`[MemoryManager] Cleanup completed for user ${userId}`);
@@ -18,7 +18,7 @@ export class MemoryManager {
   /**
    * Get memory statistics for a user
    */
-  async getMemoryStats(userId: number): Promise<{
+  async getMemoryStats(userId: string): Promise<{
     totalMemories: number;
     memoriesByType: Record<string, number>;
   }> {
@@ -30,12 +30,15 @@ export class MemoryManager {
       memoriesByType: {},
     };
 
-    // Count memories for each type
-    for (const [memoryType, maxLimit] of Object.entries(MAX_MEMORIES_PER_TYPE)) {
-      const memories = await userMemoryService.getMemories(userId, memoryType, maxLimit);
-      stats.memoriesByType[memoryType] = memories.length;
-      stats.totalMemories += memories.length;
-    }
+    // Get all memories for the user
+    const allMemories = await userMemoryService.getAllMemories(userId);
+    
+    // Count memories by type
+    allMemories.forEach(memory => {
+      const type = memory.memory_type;
+      stats.memoriesByType[type] = (stats.memoriesByType[type] || 0) + 1;
+      stats.totalMemories++;
+    });
 
     return stats;
   }

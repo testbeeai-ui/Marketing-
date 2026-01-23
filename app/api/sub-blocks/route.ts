@@ -4,7 +4,7 @@ import { blockStorage } from '@/lib/services/blockStorage';
 import { getNumericUserIdFromRequest } from '@/lib/auth-server';
 import { createSubBlockSchema, updateSubBlockSchema } from '@/lib/validations/api';
 
-// GET /api/sub-blocks?blockId=xxx or ?id=xxx
+// GET /api/sub-blocks?blockId=xxx
 export async function GET(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
@@ -14,35 +14,20 @@ export async function GET(request: NextRequest) {
 
         const { searchParams } = new URL(request.url);
         const blockId = searchParams.get('blockId');
-        const id = searchParams.get('id');
+        if (!blockId) {
+            return NextResponse.json({ error: 'blockId is required' }, { status: 400 });
+        }
 
         await subBlockStorage.ensureLoaded();
-
-        if (id) {
-            const subBlock = await subBlockStorage.getByUserId(id, userId);
-            if (!subBlock) {
-                return NextResponse.json({ error: 'Sub-block not found' }, { status: 404 });
-            }
-            return NextResponse.json(subBlock);
-        }
-
-        if (blockId) {
-            const block = await blockStorage.getByUserId(blockId, userId);
-            if (!block) {
-                return NextResponse.json({ error: 'Block not found' }, { status: 404 });
-            }
-            const subBlocks = await subBlockStorage.getByBlockId(blockId, userId);
-            return NextResponse.json(subBlocks);
-        }
-
-        return NextResponse.json({ error: 'blockId or id parameter required' }, { status: 400 });
+        const subBlocks = await subBlockStorage.getAllByBlockId(blockId, userId);
+        return NextResponse.json(subBlocks);
     } catch (error: any) {
         console.error('Error fetching sub-blocks:', error);
         return NextResponse.json({ error: error.message || 'Failed to fetch sub-blocks' }, { status: 500 });
     }
 }
 
-// POST /api/sub-blocks
+// POST /api/sub-blocks (create)
 export async function POST(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
@@ -67,12 +52,16 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Block not found' }, { status: 404 });
         }
 
+        const now = new Date().toISOString();
         const subBlock = await subBlockStorage.create({
+            id: crypto.randomUUID(),
             userId,
             blockId,
             name: name.trim(),
             prompt: prompt || '',
             storyVariations: [],
+            createdAt: now,
+            updatedAt: now
         });
 
         return NextResponse.json(subBlock);
@@ -105,14 +94,18 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Sub-block not found' }, { status: 404 });
         }
 
-        const updates: any = {};
-        if (storyVariations) updates.storyVariations = storyVariations;
-        if (selectedVariationId !== undefined) updates.selectedVariationId = selectedVariationId;
-        if (platformContents) updates.platformContents = platformContents;
-        if (name !== undefined) updates.name = name.trim();
-        if (prompt !== undefined) updates.prompt = prompt.trim();
+        // Create updated sub-block object
+        const updatedSubBlock = {
+            ...existing,
+            name: name !== undefined ? name.trim() : existing.name,
+            prompt: prompt !== undefined ? prompt.trim() : existing.prompt,
+            storyVariations: storyVariations !== undefined ? storyVariations : existing.storyVariations,
+            selectedVariationId: selectedVariationId !== undefined ? selectedVariationId : existing.selectedVariationId,
+            platformContents: platformContents !== undefined ? platformContents : existing.platformContents,
+            updatedAt: new Date().toISOString()
+        };
 
-        const updated = await subBlockStorage.update(id, updates);
+        const updated = await subBlockStorage.update(updatedSubBlock);
         return NextResponse.json(updated);
     } catch (error: any) {
         console.error('Error updating sub-block:', error);

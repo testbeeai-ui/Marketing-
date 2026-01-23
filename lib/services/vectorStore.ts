@@ -3,7 +3,7 @@ import { supabase } from '../db/client';
 
 interface VectorChunk {
   id: string;
-  userId: number; // User ID that owns this chunk
+  userId: string; // Changed from number to string to match UUID
   blockId: string;
   fileId: string;
   text: string;
@@ -31,188 +31,225 @@ export class VectorStore {
     }
   }
 
-  async addChunk(
+  /**
+   * Store a document chunk with its embedding
+   */
+  async storeChunk(
+    id: string,
+    userId: string, // Changed from number to string
     blockId: string,
     fileId: string,
     text: string,
-    metadata: { fileName: string; chunkIndex: number },
-    userId?: number
-  ): Promise<string> {
+    metadata: { fileName: string; chunkIndex: number }
+  ): Promise<void> {
     if (!supabase) {
-      throw new Error('Supabase client not initialized. Cannot store embeddings.');
+      throw new Error('Supabase client not initialized');
     }
 
-    const embedding = await this.embeddingService.generateEmbedding(text);
-    const id = `${blockId}-${fileId}-${metadata.chunkIndex}`;
-    
-    // Convert embedding array to PostgreSQL array format string for pgvector
-    const embeddingString = `[${embedding.join(',')}]`;
+    try {
+      // Generate embedding for the text
+      const embedding = await this.embeddingService.generateEmbedding(text);
+      
+      // Store in Supabase with pgvector
+      const { error } = await supabase
+        .from('vector_chunks')
+        .insert({
+          id,
+          user_id: userId,
+          block_id: blockId,
+          file_id: fileId,
+          text,
+          embedding,
+          metadata,
+          created_at: new Date().toISOString(),
+        });
 
-    const { error } = await supabase
-      .from('vector_chunks')
-      .upsert({
-        id,
-        user_id: userId || 0, // Store user ID if provided
-        block_id: blockId,
-        file_id: fileId,
-        text,
-        embedding: embeddingString,
-        metadata: {
-          fileName: metadata.fileName,
-          chunkIndex: metadata.chunkIndex,
-        },
-      }, {
-        onConflict: 'id',
+      if (error) {
+        throw new Error(`Failed to store vector chunk: ${error.message}`);
+      }
+
+      console.log(`[VectorStore] Stored chunk ${id} for file ${fileId}`);
+    } catch (error) {
+      console.error('[VectorStore] Error storing chunk:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for similar chunks using vector similarity
+   */
+  async searchSimilarChunks(
+    query: string,
+    userId?: string, // Changed from number to string
+    blockId?: string,
+    limit: number = 10,
+    similarityThreshold: number = 0.7
+  ): Promise<VectorChunk[]> {
+    if (!supabase) {
+      throw new Error('Supabase client not initialized');
+    }
+
+    try {
+      // Generate embedding for the query
+      const queryEmbedding = await this.embeddingService.generateEmbedding(query);
+      
+      // Build the SQL query with vector similarity
+      let sqlQuery = `
+        SELECT id, user_id, block_id, file_id, text, metadata, 
+               1 - (embedding <=> $1) as similarity
+        FROM vector_chunks
+        WHERE 1 - (embedding <=> $1) > $2
+      `;
+      
+      const params: any[] = [queryEmbedding, similarityThreshold];
+      
+      if (userId) {
+        sqlQuery += ` AND user_id = $${params.length + 1}`;
+        params.push(userId);
+      }
+      
+      if (blockId) {
+        sqlQuery += ` AND block_id = $${params.length + 1}`;
+        params.push(blockId);
+      }
+      
+      sqlQuery += ` ORDER BY embedding <=> $1 LIMIT $${params.length + 1}`;
+      params.push(limit);
+
+      const { data, error } = await supabase.rpc('execute_sql', {
+        query: sqlQuery,
+        params: params
       });
 
-    if (error) {
-      console.error('[VectorStore] Error storing chunk:', error);
-      throw new Error(`Failed to store embedding: ${error.message}`);
-    }
-
-    return id;
-  }
-
-  async addChunks(
-    blockId: string,
-    fileId: string,
-    texts: string[],
-    fileName: string,
-    userId?: number
-  ): Promise<string[]> {
-    const chunks = texts.map((text, index) => ({
-      text,
-      metadata: { fileName, chunkIndex: index },
-    }));
-
-    // Process in batches to avoid hitting rate limits (concurrency limit ~5 for free tier)
-    const BATCH_SIZE = 5;
-    const ids: string[] = [];
-
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE);
-      const batchIds = await Promise.all(
-        batch.map(chunk =>
-          this.addChunk(blockId, fileId, chunk.text, chunk.metadata, userId)
-        )
-      );
-      ids.push(...batchIds);
-      
-      // Small delay between batches to be nice to the API
-      if (i + BATCH_SIZE < chunks.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+      if (error) {
+        throw new Error(`Failed to search similar chunks: ${error.message}`);
       }
-    }
-    
-    return ids;
-  }
 
-  async search(
-    queryEmbedding: number[],
-    blockId: string,
-    topK: number = 5,
-    userId?: number
-  ): Promise<VectorChunk[]> {
-    if (!supabase) {
-      throw new Error('Supabase client not initialized. Cannot search embeddings.');
-    }
-
-    // Convert query embedding to PostgreSQL array format
-    const queryEmbeddingString = `[${queryEmbedding.join(',')}]`;
-
-    // Use Supabase RPC function for vector similarity search
-    // Note: The function should filter by user_id if userId is provided
-    const { data, error } = await supabase.rpc('match_vector_chunks', {
-      query_embedding: queryEmbeddingString,
-      match_block_id: blockId,
-      match_user_id: userId || null, // Filter by user ID if provided
-      match_threshold: 0.5, // Similarity threshold (0-1), lower = more results
-      match_count: topK,
-    });
-
-    if (error) {
-      console.error('[VectorStore] Error searching embeddings:', error);
-      throw new Error(`Failed to search embeddings: ${error.message}`);
-    }
-
-    // Convert Supabase response to VectorChunk format
-    const chunks: VectorChunk[] = (data || []).map((row: any) => ({
-      id: row.id,
-      userId: row.user_id || 0,
-      blockId: row.block_id,
-      fileId: row.file_id,
-      text: row.text,
-      embedding: Array.isArray(row.embedding) ? row.embedding : JSON.parse(row.embedding || '[]'),
-      metadata: row.metadata || {},
-    }));
-
-    return chunks;
-  }
-
-  async searchByQuery(
-    query: string,
-    blockId: string,
-    topK: number = 5,
-    userId?: number
-  ): Promise<VectorChunk[]> {
-    try {
-      const queryEmbedding = await this.embeddingService.generateEmbedding(query);
-      return this.search(queryEmbedding, blockId, topK, userId);
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        userId: row.user_id,
+        blockId: row.block_id,
+        fileId: row.file_id,
+        text: row.text,
+        embedding: row.embedding,
+        metadata: row.metadata,
+      }));
     } catch (error) {
-      console.error('[VectorStore] Error generating query embedding:', error);
-      // Return empty results instead of crashing if embedding generation fails
-      return [];
+      console.error('[VectorStore] Error searching similar chunks:', error);
+      throw error;
     }
   }
 
+  /**
+   * Delete all chunks for a specific file
+   */
   async deleteByFileId(fileId: string): Promise<void> {
     if (!supabase) {
-      throw new Error('Supabase client not initialized. Cannot delete embeddings.');
+      throw new Error('Supabase client not initialized');
     }
 
-    const { error } = await supabase
-      .from('vector_chunks')
-      .delete()
-      .eq('file_id', fileId);
+    try {
+      const { error } = await supabase
+        .from('vector_chunks')
+        .delete()
+        .eq('file_id', fileId);
 
-    if (error) {
-      console.error('[VectorStore] Error deleting chunks by file_id:', error);
-      throw new Error(`Failed to delete embeddings: ${error.message}`);
+      if (error) {
+        throw new Error(`Failed to delete chunks by file ID: ${error.message}`);
+      }
+
+      console.log(`[VectorStore] Deleted chunks for file ${fileId}`);
+    } catch (error) {
+      console.error('[VectorStore] Error deleting chunks by file ID:', error);
+      throw error;
     }
   }
 
+  /**
+   * Delete all chunks for a specific block
+   */
   async deleteByBlockId(blockId: string): Promise<void> {
     if (!supabase) {
-      throw new Error('Supabase client not initialized. Cannot delete embeddings.');
+      throw new Error('Supabase client not initialized');
     }
 
-    const { error } = await supabase
-      .from('vector_chunks')
-      .delete()
-      .eq('block_id', blockId);
+    try {
+      const { error } = await supabase
+        .from('vector_chunks')
+        .delete()
+        .eq('block_id', blockId);
 
-    if (error) {
-      console.error('[VectorStore] Error deleting chunks by block_id:', error);
-      throw new Error(`Failed to delete embeddings: ${error.message}`);
+      if (error) {
+        throw new Error(`Failed to delete chunks by block ID: ${error.message}`);
+      }
+
+      console.log(`[VectorStore] Deleted chunks for block ${blockId}`);
+    } catch (error) {
+      console.error('[VectorStore] Error deleting chunks by block ID:', error);
+      throw error;
     }
   }
 
-  async getChunkCount(blockId: string): Promise<number> {
+  /**
+   * Delete all chunks for a specific user
+   */
+  async deleteByUserId(userId: string): Promise<void> { // Changed from number to string
     if (!supabase) {
-      return 0;
+      throw new Error('Supabase client not initialized');
     }
 
-    const { count, error } = await supabase
-      .from('vector_chunks')
-      .select('*', { count: 'exact', head: true })
-      .eq('block_id', blockId);
+    try {
+      const { error } = await supabase
+        .from('vector_chunks')
+        .delete()
+        .eq('user_id', userId);
 
-    if (error) {
-      console.error('[VectorStore] Error counting chunks:', error);
-      return 0;
+      if (error) {
+        throw new Error(`Failed to delete chunks by user ID: ${error.message}`);
+      }
+
+      console.log(`[VectorStore] Deleted chunks for user ${userId}`);
+    } catch (error) {
+      console.error('[VectorStore] Error deleting chunks by user ID:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get statistics for a specific user
+   */
+  async getStats(userId?: string): Promise<{ totalChunks: number; totalFiles: number; totalBlocks: number }> { // Changed from number to string
+    if (!supabase) {
+      return { totalChunks: 0, totalFiles: 0, totalBlocks: 0 };
     }
 
-    return count || 0;
+    try {
+      let query = supabase
+        .from('vector_chunks')
+        .select('file_id, block_id', { count: 'exact' });
+
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { count, data, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to get vector stats: ${error.message}`);
+      }
+
+      const uniqueFiles = new Set(data?.map(row => row.file_id) || []);
+      const uniqueBlocks = new Set(data?.map(row => row.block_id) || []);
+
+      return {
+        totalChunks: count || 0,
+        totalFiles: uniqueFiles.size,
+        totalBlocks: uniqueBlocks.size,
+      };
+    } catch (error) {
+      console.error('[VectorStore] Error getting stats:', error);
+      return { totalChunks: 0, totalFiles: 0, totalBlocks: 0 };
+    }
   }
 }
 

@@ -7,7 +7,7 @@ interface PlatformContentRequest {
   storyId?: string;
   storyContent?: string; // Raw story content if storyId is not provided
   platforms: ('linkedin' | 'twitter' | 'instagram' | 'facebook')[];
-  userId?: number;
+  userId?: string; // Changed from number to string to match UUID
   imageContext?: Record<string, { enhancedPrompt: string; imageUrl?: string }>; // Platform -> image info
 }
 
@@ -169,17 +169,17 @@ ${baseInstructions[platform] || baseInstructions.linkedin}
       // Get platform-specific liked/disliked styles if userId available
       if (userContext.profile.user_id) {
         try {
-          const likedStyles = await userMemoryService.getLikedStyles(
+          // Get liked and disliked caption styles for this platform
+          const likedCaptionType = `liked_caption_style_${platform}`;
+          const dislikedCaptionType = `disliked_caption_style_${platform}`;
+          
+          const likedStyles = await userMemoryService.getMemoriesByType(
             userContext.profile.user_id,
-            'caption',
-            platform,
-            5
+            likedCaptionType
           );
-          const dislikedStyles = await userMemoryService.getDislikedStyles(
+          const dislikedStyles = await userMemoryService.getMemoriesByType(
             userContext.profile.user_id,
-            'caption',
-            platform,
-            3
+            dislikedCaptionType
           );
 
           if (likedStyles.length > 0) {

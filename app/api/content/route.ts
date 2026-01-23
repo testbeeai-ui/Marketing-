@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { contentCreator } from '@/lib/services/contentCreator';
 import { userMemoryService, MEMORY_TYPES } from '@/lib/services/userMemoryService';
 import { styleExtractor } from '@/lib/services/styleExtractor';
-import { getNumericUserIdFromRequest } from '@/lib/auth-server';
+import { getUserIdFromRequest } from '@/lib/auth-server';
 
 // POST /api/content - Generate content or handle like/dislike
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
         const { action, storyId, storyContent, platforms, imageContext, caption, platform } = body;
-        const userId = await getNumericUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
 
         // Like caption
         if (action === 'like') {
@@ -69,29 +69,28 @@ export async function POST(request: NextRequest) {
                 preferred_alternative: dislikeAnalysis.preferred_alternative,
             });
 
-            return NextResponse.json({ success: true, message: 'Disliked caption style saved' });
+            return NextResponse.json({ success: true, message: 'Dislike analysis saved' });
         }
 
-        // Generate content (default action)
-        if (!storyId && !storyContent) {
-            return NextResponse.json({ error: 'Either storyId or storyContent is required' }, { status: 400 });
+        // Generate content
+        if (action === 'generate') {
+            if (!storyId || !storyContent || !platforms || !Array.isArray(platforms)) {
+                return NextResponse.json({ error: 'storyId, storyContent, and platforms are required' }, { status: 400 });
+            }
+
+            const contents = await contentCreator.generateContent({
+                storyId,
+                storyContent,
+                platforms,
+                userId: userId || undefined,
+                imageContext
+            });
+            return NextResponse.json({ contents });
         }
 
-        if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
-            return NextResponse.json({ error: 'platforms array is required' }, { status: 400 });
-        }
-
-        const content = await contentCreator.generateContent({
-            storyId,
-            storyContent,
-            platforms,
-            userId: userId ?? undefined,
-            imageContext,
-        });
-
-        return NextResponse.json(content);
+        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     } catch (error: any) {
         console.error('Error in content API:', error);
-        return NextResponse.json({ error: error.message || 'Failed to process request' }, { status: 500 });
+        return NextResponse.json({ error: error.message || 'Failed to process content' }, { status: 500 });
     }
 }

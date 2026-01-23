@@ -1,6 +1,6 @@
 import { aiService } from './aiService';
 import { userProfileService } from './userProfileService';
-import { userMemoryService } from './userMemoryService';
+import { userMemoryService, MEMORY_TYPES } from './userMemoryService';
 import { supabase, isDatabaseAvailable } from '../db/client';
 import fs from 'fs/promises';
 import path from 'path';
@@ -24,13 +24,13 @@ export class ImageGenerator {
    */
   async enhanceTextForImageGeneration(
     rawText: string,
-    userId?: number,
+    userId?: string, // Changed from number to string
     platform?: string
   ): Promise<string> {
     const userContext: {
-      profile?: { style_preferences?: string } | null;
-      likedStyles?: Array<{ context_metadata?: { style_summary?: string }; content: string }>;
-      dislikedStyles?: Array<{ context_metadata?: { why_disliked?: string; preferred_alternative?: string }; content: string }>;
+      profile?: any;
+      likedStyles?: unknown[];
+      dislikedStyles?: unknown[];
     } = {};
 
     if (userId) {
@@ -40,113 +40,87 @@ export class ImageGenerator {
           userContext.profile = profile;
         }
 
-        // Get liked/disliked image styles
-        userContext.likedStyles = await userMemoryService.getLikedStyles(userId, 'image', undefined, 15);
-        userContext.dislikedStyles = await userMemoryService.getDislikedStyles(userId, 'image', undefined, 12);
+        // Get user memory for image styles
+        const likedStyles = await userMemoryService.getMemoriesByType(userId, MEMORY_TYPES.LIKED_IMAGE_STYLE);
+        const dislikedStyles = await userMemoryService.getMemoriesByType(userId, MEMORY_TYPES.DISLIKED_IMAGE_STYLE);
+        userContext.likedStyles = likedStyles;
+        userContext.dislikedStyles = dislikedStyles;
       } catch (error) {
-        console.error('Error loading user context for image:', error);
+        console.error('Error loading user context:', error);
       }
     }
 
-    const platformContext = platform ? `Target Platform: ${platform.toUpperCase()}` : 'Target Platform: GENERAL';
-
-    // Platform specific style guidelines
-    let platformStyle = '';
-    if (platform?.toLowerCase().includes('linkedin')) {
-      platformStyle = 'Style: Professional, Corporate, Sleek, Minimalist, High-end Commercial Photography. Avoid: Cartoony, messy, chaotic.';
-    } else if (platform?.toLowerCase().includes('instagram')) {
-      platformStyle = 'Style: Aesthetic, Vibrant, Inspiring, High Saturation, Lifestyle Photography, Influencer Quality.';
-    } else if (platform?.toLowerCase().includes('twitter') || platform?.toLowerCase().includes('x')) {
-      platformStyle = 'Style: Eye-catching, Bold, Viral, Meme-worthy or Sharp Graphic Design. High contrast.';
-    } else if (platform?.toLowerCase().includes('facebook')) {
-      platformStyle = 'Style: Community-focused, Warm, Engaging, Relatable but High Quality.';
-    }
-
-    const systemPrompt = `You are a Visionary Creative Director & Visual Storyteller.
-Your goal is to translate abstract concepts into profound, multi-layered visual narratives, not just "pretty pictures."
-
-${platformContext}
-Platform Vibe: ${platform ? platform.toUpperCase() : 'General'}
-
-DEEP ANALYSIS FRAMEWORK:
-1. CORE NARRATIVE: What is the *underlying* story? (e.g., "The David vs Goliath struggle of a startup" vs "The quiet dignity of craftsmanship")
-2. EMOTIONAL RESONANCE: How should the viewer *feel*? (Awed, unsettled, comforted, energized?)
-3. VISUAL METAPHOR: Don't illustrate the text literally. Find the visual poetry.
-   - "Growth" isn't just a chart; it's a sapling breaking through concrete.
-   - "Connectivity" isn't just lines; it's a constellation of bioluminescent organisms.
-
-VISUAL DIMENSIONS TO DEFINE:
-- **Foreground/Background**: Establish depth. What is immediate? What is vast?
-- **Lighting as Emotion**: Use light to tell the story (e.g., "chiaroscuro for drama," "subsurface scattering for organic warmth," "harsh neon for cyber-tension").
-- **Texture & Materiality**: Define the tactile quality (e.g., "gritty concrete," "liquid chrome," "soft velvet," "translucent glass").
-- **Composition**: Rule of thirds, center symmetry, leading lines?
-
-CRITICAL INSTRUCTION:
-- AVOID generic "stock photo" looks or "corporate memphis."
-- IF the topic is digital/tech, AVOID generic "matrix code" or "floating holograms" unless subverted creatively.
-- PUSH for cinematic, editorial, or fine-art aesthetics.
-
-OUTPUT FORMAT:
-Return ONLY the final prompt string.
-The prompt should follow this structure:
-"[Art Medium/Style] of [Core Subject/Metaphor], [Foreground Element] vs [Background Context], [Lighting Strategy], [Color Palette], [Texture/Material Details], [Technical Specs (e.g. 8k, depth of field)]"
-
-EXAMPLE DEEP OUTPUTS:
-- "Cinematic wide shot of a solitary astronaut standing on a dune of black sand, looking up at a colossal, crumbling stone statue of a smartphone, soft dusty atmosphere, golden hour lighting hitting the astronaut's visor, textural contrast between organic sand and digital ruins, 8k, anamorphic lens."
-- "Macro photography of a mechanical watch gear mechanism where the gears are made of tiny, glowing city buildings, depth of field focusing on the intricate clockwork city, cool blue bioluminescence against deep brass shadows, steampunk meets cyberpunk, ultra-detailed."
-
-Now, read the content and act as the Visionary Director.`;
-
-    let contextPrompt = '';
-
-    if (userContext.profile) {
-      contextPrompt += `\n\nUSER CONTEXT (Apply these preferences):\n`;
-
-      if (userContext.profile.style_preferences) {
-        contextPrompt += `User Style Preference: ${userContext.profile.style_preferences}\n`;
-      }
-
-      // Add liked styles
-      if (userContext.likedStyles && userContext.likedStyles.length > 0) {
-        contextPrompt += `\nUser LIKES these image styles (apply these):\n`;
-        userContext.likedStyles.slice(0, 5).forEach((memory) => {
-          const summary = memory.context_metadata?.style_summary || memory.content.substring(0, 100);
-          contextPrompt += `- ${summary}\n`;
-        });
-      }
-
-      // Add disliked styles
-      if (userContext.dislikedStyles && userContext.dislikedStyles.length > 0) {
-        contextPrompt += `\nUser DISLIKES these image styles (avoid these):\n`;
-        userContext.dislikedStyles.slice(0, 3).forEach((memory) => {
-          const whyDisliked = memory.context_metadata?.why_disliked || 'User disliked this style';
-          const alternative = memory.context_metadata?.preferred_alternative || '';
-          contextPrompt += `- Avoid: ${whyDisliked}\n`;
-          if (alternative) {
-            contextPrompt += `  Instead: ${alternative}\n`;
-          }
-        });
-      }
-    }
-
-    const fullPrompt = `${systemPrompt}${contextPrompt}
-
-User's Content Idea: "${rawText}"
-
-Generate the Detailed Studio-Quality Image Prompt now:`;
-
-    return await aiService.generateContent(fullPrompt);
+    const enhancedPrompt = await this.buildEnhancedPrompt(rawText, userContext, platform);
+    return enhancedPrompt;
   }
 
-  /**
-   * Upload image buffer to Supabase Storage
-   */
+  private async buildEnhancedPrompt(
+    rawText: string,
+    userContext: { profile?: any; likedStyles?: unknown[]; dislikedStyles?: unknown[] },
+    platform?: string
+  ): Promise<string> {
+    const platformContext = platform ? this.getPlatformImageContext(platform) : '';
+    const userProfileContext = userContext.profile ? this.getUserProfileImageContext(userContext.profile) : '';
+    const likedStylesContext = userContext.likedStyles && userContext.likedStyles.length > 0
+      ? `User likes these visual styles: ${userContext.likedStyles.map((s: any) => s.context_metadata?.style_summary || s.content).join(', ')}`
+      : '';
+    const dislikedStylesContext = userContext.dislikedStyles && userContext.dislikedStyles.length > 0
+      ? `User dislikes these visual styles: ${userContext.dislikedStyles.map((s: any) => s.context_metadata?.why_disliked || s.content).join(', ')}`
+      : '';
 
+    const enhancedPrompt = `SYSTEM ROLE: You are a world-class visual prompt engineer specializing in marketing imagery.
 
-  /**
-   * Get dimensions for a platform or use defaults
-   */
-  getPlatformDimensions(platform?: string): { width: number; height: number } {
+USER REQUEST: "${rawText}"
+
+${platformContext}
+${userProfileContext}
+${likedStylesContext}
+${dislikedStylesContext}
+
+ENHANCEMENT TASK:
+Transform the user's request into a detailed, high-quality image generation prompt that will create compelling marketing visuals.
+
+ENHANCEMENT RULES:
+1. Add specific visual details (lighting, composition, style)
+2. Include color palette recommendations
+3. Specify image dimensions and aspect ratio
+4. Add technical photography/art terms
+5. Ensure the prompt is optimized for AI image generation
+6. Keep the prompt concise but comprehensive
+
+OUTPUT FORMAT:
+Return ONLY the enhanced prompt text, no additional commentary.
+
+Enhanced prompt:`;
+
+    try {
+      const result = await aiService.generateContent(enhancedPrompt);
+      return result.trim();
+    } catch (error) {
+      console.error('Error enhancing prompt:', error);
+      return rawText; // Fallback to original text
+    }
+  }
+
+  private getPlatformImageContext(platform: string): string {
+    const contexts: Record<string, string> = {
+      linkedin: 'LINKEDIN CONTEXT: Professional, clean, business-oriented imagery. Corporate color schemes. Minimal text overlay.',
+      twitter: 'TWITTER CONTEXT: Eye-catching, scroll-stopping visuals. Bold colors. Can include text overlay. Square or landscape format.',
+      instagram: 'INSTAGRAM CONTEXT: Aesthetic, visually appealing. Lifestyle-focused. Can use filters and effects. Square format preferred.',
+      facebook: 'FACEBOOK CONTEXT: Community-focused, relatable imagery. Warm tones. Can include text overlay. Various formats supported.'
+    };
+    return contexts[platform] || '';
+  }
+
+  private getUserProfileImageContext(profile: any): string {
+    const context: string[] = [];
+    if (profile.industry) context.push(`Industry: ${profile.industry}`);
+    if (profile.target_audience) context.push(`Target Audience: ${profile.target_audience}`);
+    if (profile.brand_voice) context.push(`Brand Voice: ${profile.brand_voice}`);
+    return context.length > 0 ? `USER PROFILE: ${context.join(', ')}` : '';
+  }
+
+  private getPlatformDimensions(platform?: string): { width: number; height: number } {
     if (platform && PLATFORM_DIMENSIONS[platform]) {
       return PLATFORM_DIMENSIONS[platform];
     }
@@ -159,7 +133,7 @@ Generate the Detailed Studio-Quality Image Prompt now:`;
    */
   async generateImage(
     prompt: string,
-    userId?: number,
+    userId?: string, // Changed from number to string
     width?: number,
     height?: number,
     platform?: string
@@ -177,32 +151,53 @@ Generate the Detailed Studio-Quality Image Prompt now:`;
     }
 
     try {
-      console.log(`[ImageGenerator] Generating image for prompt: ${enhancedPrompt.substring(0, 50)}... (${finalWidth}x${finalHeight}, platform: ${platform || 'none'})`);
+      // Generate image using AI service (returns Buffer)
+      const imageBuffer = await aiService.generateImage(enhancedPrompt, finalWidth, finalHeight);
 
-      // Use Imagen 4.0 via Vertex AI
-      // Note: We use the aiService wrapper which generates the image buffer directly
-      const buffer = await aiService.generateImage(enhancedPrompt, finalWidth, finalHeight);
+      // Store in Supabase if userId provided and database available
+      if (userId && isDatabaseAvailable()) {
+        try {
+          const fileName = `image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`;
+          const filePath = `${userId}/${fileName}`;
+          
+          // Upload the Buffer directly to Supabase Storage
+          const { data: uploadData, error: uploadError } = await supabase!
+            .storage
+            .from('images')
+            .upload(filePath, imageBuffer, {
+              contentType: 'image/png',
+              upsert: false
+            });
 
-      // Convert buffer to Base64 Data URL
-      // This avoids file system issues and ensures immediate availability
-      const base64Image = buffer.toString('base64');
-      const mimeType = 'image/jpeg'; // Assuming JPEG from aiService, change if PNG
-      const imageUrl = `data:${mimeType};base64,${base64Image}`;
+          if (uploadError) {
+            console.warn(`[ImageGenerator] Failed to upload image to Supabase: ${uploadError.message}`);
+            // Continue without storing
+          } else {
+            // Get public URL
+            const { data: { publicUrl } } = supabase!
+              .storage
+              .from('images')
+              .getPublicUrl(filePath);
+
+            console.log(`[ImageGenerator] Image uploaded to Supabase: ${publicUrl}`);
+            return { enhancedPrompt, imageUrl: publicUrl, platform };
+          }
+        } catch (storageError) {
+          console.warn('[ImageGenerator] Supabase storage error:', storageError);
+          // Continue without storing
+        }
+      }
+
+      // If no Supabase storage or upload failed, return data URL
+      const base64Image = imageBuffer.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64Image}`;
       
-      console.log(`[ImageGenerator] Generated image as Base64 Data URL`);
+      console.log(`[ImageGenerator] Image generated as data URL (${base64Image.length} bytes)`);
+      return { enhancedPrompt, imageUrl: dataUrl, platform };
 
-      return {
-        enhancedPrompt,
-        imageUrl,
-        platform: platform || undefined,
-      };
-    } catch (error) {
-      console.error('Error generating image:', error);
-      // Return enhanced prompt even if image generation fails
-      return {
-        enhancedPrompt,
-        platform: platform || undefined,
-      };
+    } catch (error: any) {
+      console.error('[ImageGenerator] Image generation failed:', error);
+      throw new Error(`Failed to generate image: ${error.message}`);
     }
   }
 }
