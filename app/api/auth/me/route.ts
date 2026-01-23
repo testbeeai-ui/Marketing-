@@ -1,18 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 import { userProfileService } from '@/lib/services/userProfileService';
 
 // Helper to verify auth token
 async function verifyAuthToken(request: NextRequest) {
-    const supabase = createServerClient();
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            cookies: {
+                getAll() {
+                    return cookieStore.getAll();
+                },
+                setAll(cookiesToSet) {
+                    try {
+                        cookiesToSet.forEach(({ name, value, options }) =>
+                            cookieStore.set(name, value, options)
+                        );
+                    } catch {
+                        // The `setAll` method was called from a Server Component.
+                        // This can be ignored if you have middleware refreshing
+                        // user sessions.
+                    }
+                },
+            },
+        }
+    );
     const authHeader = request.headers.get('authorization');
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+         const token = authHeader.substring(7);
+         const { data: { user }, error } = await supabase.auth.getUser(token);
+         if (error || !user) {
+             return null;
+         }
+         const numericUserId = parseInt(user.id.replace(/-/g, '').substring(0, 15), 16) % 2147483647;
+         return {
+            id: user.id,
+            numericId: numericUserId,
+            email: user.email,
+        };
     }
-
-    const token = authHeader.substring(7);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    // Check cookie session if no bearer token
+    const { data: { user }, error } = await supabase.auth.getUser();
 
     if (error || !user) {
         return null;
