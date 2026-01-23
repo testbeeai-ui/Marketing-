@@ -3,7 +3,7 @@
 -- Blocks Table
 CREATE TABLE IF NOT EXISTS blocks (
     id TEXT PRIMARY KEY,
-    user_id BIGINT REFERENCES user_profiles(user_id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES user_profiles(user_id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS documents (
 -- Sub-Blocks Table
 CREATE TABLE IF NOT EXISTS sub_blocks (
     id TEXT PRIMARY KEY,
-    user_id BIGINT REFERENCES user_profiles(user_id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES user_profiles(user_id) ON DELETE CASCADE,
     block_id TEXT REFERENCES blocks(id) ON DELETE CASCADE,
     name TEXT,
     prompt TEXT,

@@ -12,7 +12,9 @@ const execPromise = util.promisify(exec);
  */
 export class FileProcessor {
 
-  async processFile(buffer: Buffer, mimetype: string, originalName?: string): Promise<string> {
+  async processFile(params: { name: string; type: string; size: number; content: string; userId: string }): Promise<{ id: string; name: string; type: string; size: number; userId: string; content: string }> {
+    const { name, type: mimetype, content, userId } = params;
+    
     // Handle text-based files directly (JSON, TXT, CSV, etc.)
     const textBasedMimeTypes = [
       'application/json',
@@ -25,14 +27,20 @@ export class FileProcessor {
     ];
 
     const textBasedExtensions = ['.json', '.txt', '.csv', '.md', '.html', '.xml', '.log'];
-    const fileExtension = originalName ? path.extname(originalName).toLowerCase() : '';
+    const fileExtension = name ? path.extname(name).toLowerCase() : '';
 
     // If it's a text-based file, read it directly without Docling
-    if (textBasedMimeTypes.includes(mimetype.toLowerCase()) || textBasedExtensions.includes(fileExtension)) {
+    if (mimetype && textBasedMimeTypes.includes(mimetype.toLowerCase()) || textBasedExtensions.includes(fileExtension)) {
       try {
-        const text = buffer.toString('utf-8');
-        console.log(`[FileProcessor] Processed ${originalName || 'file'} as text (${text.length} characters)`);
-        return text;
+        console.log(`[FileProcessor] Processed ${name || 'file'} as text (${content.length} characters)`);
+        return {
+          id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name,
+          type: mimetype,
+          size: content.length,
+          userId,
+          content
+        };
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error('[FileProcessor] Error reading text file:', errorMessage);
@@ -45,12 +53,21 @@ export class FileProcessor {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/msword',
     ];
-    if (docxMimeTypes.includes(mimetype.toLowerCase()) || fileExtension === '.docx' || fileExtension === '.doc') {
+    if (mimetype && docxMimeTypes.includes(mimetype.toLowerCase()) || fileExtension === '.docx' || fileExtension === '.doc') {
       try {
-        console.log(`[FileProcessor] Using mammoth to process ${originalName || 'document'} (${mimetype})`);
+        console.log(`[FileProcessor] Using mammoth to process ${name || 'document'} (${mimetype})`);
+        // Convert content string back to buffer for mammoth
+        const buffer = Buffer.from(content, 'utf-8');
         const result = await mammoth.extractRawText({ buffer });
-        console.log(`[FileProcessor] Mammoth extracted ${result.value.length} characters from ${originalName || 'document'}`);
-        return result.value;
+        console.log(`[FileProcessor] Mammoth extracted ${result.value.length} characters from ${name || 'document'}`);
+        return {
+          id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name,
+          type: mimetype,
+          size: result.value.length,
+          userId,
+          content: result.value
+        };
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error('[FileProcessor] Mammoth processing error:', errorMessage);
@@ -59,14 +76,16 @@ export class FileProcessor {
     }
 
     // For documents (PDF, Word, etc.), use Docling
-    // Use a safe filename or generic one if originalName is missing
-    const safeName = originalName ? originalName.replace(/[^a-zA-Z0-9.-]/g, '_') : 'document';
+    // Use a safe filename or generic one if name is missing
+    const safeName = name ? name.replace(/[^a-zA-Z0-9.-]/g, '_') : 'document';
     const tempDir = os.tmpdir();
     const tempFilePath = path.join(tempDir, `docling-${Date.now()}-${safeName}`);
 
     try {
+      // Convert content string back to buffer for file writing
+      const buffer = Buffer.from(content, 'utf-8');
       await fs.writeFile(tempFilePath, buffer);
-      console.log(`[FileProcessor] Using Docling to process ${originalName || 'document'} (${mimetype})`);
+      console.log(`[FileProcessor] Using Docling to process ${name || 'document'} (${mimetype})`);
 
       // Path to the python script
       const scriptPath = path.resolve(process.cwd(), 'server', 'services', 'docling_wrapper.py');
@@ -88,8 +107,15 @@ export class FileProcessor {
         throw new Error('Docling returned empty output');
       }
 
-      console.log(`[FileProcessor] Docling extracted ${extractedText.length} characters from ${originalName || 'document'}`);
-      return extractedText;
+      console.log(`[FileProcessor] Docling extracted ${extractedText.length} characters from ${name || 'document'}`);
+      return {
+        id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name,
+        type: mimetype,
+        size: extractedText.length,
+        userId,
+        content: extractedText
+      };
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -101,9 +127,18 @@ export class FileProcessor {
           console.log('[FileProcessor] Falling back to pdf-parse for PDF...');
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const pdfParse = require('pdf-parse');
+          // Convert content back to buffer for pdf-parse
+          const buffer = Buffer.from(content, 'utf-8');
           const data = await pdfParse(buffer);
           console.log(`[FileProcessor] pdf-parse extracted ${data.text.length} characters`);
-          return data.text;
+          return {
+            id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name,
+            type: mimetype,
+            size: data.text.length,
+            userId,
+            content: data.text
+          };
         } catch (pdfError) {
           console.error('[FileProcessor] pdf-parse fallback failed:', pdfError);
         }
