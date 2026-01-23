@@ -55,10 +55,9 @@ export class AIService {
     // User requested strict usage of Gemini 3 models ONLY
     // WARNING: If these 404, the app will fail to generate content.
     const priorityModels = [
-      'gemini-2.0-flash-exp',
-      'gemini-experimental',
-      'gemini-1.5-pro',
-      'gemini-1.5-flash'
+      'gemini-3-pro',
+      'gemini-3-flash',
+      'gemini-experimental' // Added as potential mapping for latest preview
     ];
 
     // Note: We don't verify them all at startup to save time/quota, but we log the configuration
@@ -75,9 +74,19 @@ export class AIService {
     // User requested strict usage of Gemini 3 models ONLY
     // We verified these IDs exist via diagnostic script
     const modelsToTry = [
-      'gemini-3-pro-preview',
-      'gemini-3-flash-preview'
+        'gemini-3-pro',
+        'gemini-3-flash',
+        'gemini-3-pro-preview',
+        'gemini-3-flash-preview',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-pro'
     ];
+
+    // If environment variable is set, prioritize it
+    if (process.env.GEMINI_MODEL) {
+        console.log(`[AIService] Custom model requested via env: ${process.env.GEMINI_MODEL}`);
+        modelsToTry.unshift(process.env.GEMINI_MODEL);
+    }
 
     // Try models in sequence using REST API
     for (const modelName of modelsToTry) {
