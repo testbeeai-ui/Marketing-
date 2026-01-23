@@ -97,7 +97,7 @@ export const KnowledgeBase = ({
           </div>
           <div>
             <h3 className="font-semibold text-base text-foreground">Knowledge Base</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
               {readyFiles.length} {readyFiles.length === 1 ? 'document' : 'documents'} indexed
             </p>
           </div>
@@ -122,10 +122,10 @@ export const KnowledgeBase = ({
                       file.status === "completed" ? "text-emerald-500" : "text-primary"
                     )} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                         {file.name}
                       </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                         {file.status === "uploading" && "Uploading..."}
                         {file.status === "processing" && "Processing document..."}
                         {file.status === "indexing" && "Creating embeddings..."}
@@ -222,7 +222,7 @@ export const KnowledgeBase = ({
             <p className="text-xs text-muted-foreground">
               Drag & drop or click to browse
             </p>
-            <p className="text-xs text-muted-foreground/70 mt-2">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
               🔒 Processed locally • Only text extracted • No cloud upload
           </p>
         </div>
@@ -240,8 +240,8 @@ export const KnowledgeBase = ({
         {files.length === 0 && !isProcessing && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <FileText className="w-12 h-12 text-muted-foreground/30 mb-3" />
-            <p className="text-sm text-muted-foreground">No documents yet</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-sm text-slate-600 dark:text-slate-400">No documents yet</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Upload files to start building your knowledge base
             </p>
           </div>
@@ -271,17 +271,17 @@ export const KnowledgeBase = ({
               </div>
               
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                 {file.name}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
                     {formatFileSize(file.fileSize)}
                   </span>
                   {file.status === "indexing" && (
                     <>
-                      <span className="text-xs text-muted-foreground">•</span>
-                      <span className="text-xs text-primary animate-pulse">
+                      <span className="text-xs text-slate-600 dark:text-slate-400">•</span>
+                      <span className="text-xs text-blue-600 dark:text-blue-400 animate-pulse">
                         Indexing...
               </span>
                     </>

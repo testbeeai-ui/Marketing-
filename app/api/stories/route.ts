@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
         // Check cache first
         const cached = storyCache.get(cacheKey);
         if (cached) {
-            return NextResponse.json({ stories: cached.structuredVariations });
+            return NextResponse.json({ stories: cached.variations });
         }
 
         // Generate stories
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         };
         storyCache.set(cacheKey, cacheData);
 
-        return NextResponse.json({ stories: structuredVariations });
+        return NextResponse.json({ stories: variations });
     } catch (error: any) {
         console.error('Error generating stories:', error);
         return NextResponse.json({ error: error.message || 'Failed to generate stories' }, { status: 500 });

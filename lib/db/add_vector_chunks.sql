@@ -8,20 +8,20 @@ CREATE TABLE IF NOT EXISTS vector_chunks (
     block_id TEXT REFERENCES blocks(id) ON DELETE CASCADE,
     file_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
     text TEXT,
-    embedding vector(768), -- Dimensions for Google text-embedding-004
+    embedding vector(1536),
     metadata JSONB,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_vector_chunks_embedding ON vector_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_vector_chunks_embedding ON vector_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX IF NOT EXISTS idx_vector_chunks_block_id ON vector_chunks(block_id);
 CREATE INDEX IF NOT EXISTS idx_vector_chunks_file_id ON vector_chunks(file_id);
 CREATE INDEX IF NOT EXISTS idx_vector_chunks_user_id ON vector_chunks(user_id);
 
 -- Match function for similarity search
 CREATE OR REPLACE FUNCTION match_vector_chunks(
-  query_embedding vector(768),
+  query_embedding vector(1536),
   match_threshold float,
   match_count int,
   match_block_id text,
@@ -33,7 +33,7 @@ RETURNS TABLE (
   block_id text,
   file_id text,
   text text,
-  embedding vector(768),
+  embedding vector(1536),
   metadata jsonb,
   similarity float
 )

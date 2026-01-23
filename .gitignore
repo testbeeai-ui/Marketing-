@@ -47,6 +47,7 @@ next-env.d.ts
 
 # secrets
 lib/services/gcp-key.json
+server/gcp-key.json
 
 # Build artifacts and cache
 .next/

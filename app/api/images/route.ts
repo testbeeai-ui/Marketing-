@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
         if (action === 'prompt') {
             if (!text) return NextResponse.json({ error: 'Text content is required' }, { status: 400 });
             const enhancedPrompt = await imageGenerator.enhanceTextForImageGeneration(text, userIdOrUndefined, platform);
-            return NextResponse.json({ enhancedPrompt });
+            return NextResponse.json({ prompt: enhancedPrompt, enhancedPrompt });
         }
 
         // Generate image

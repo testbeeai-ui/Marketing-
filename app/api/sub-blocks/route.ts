@@ -4,7 +4,7 @@ import { blockStorage } from '@/lib/services/blockStorage';
 import { getNumericUserIdFromRequest } from '@/lib/auth-server';
 import { createSubBlockSchema, updateSubBlockSchema } from '@/lib/validations/api';
 
-// GET /api/sub-blocks?blockId=xxx
+// GET /api/sub-blocks?blockId=xxx or /api/sub-blocks?id=xxx
 export async function GET(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
@@ -13,12 +13,21 @@ export async function GET(request: NextRequest) {
         }
 
         const { searchParams } = new URL(request.url);
+        const id = searchParams.get('id');
         const blockId = searchParams.get('blockId');
+
+        await subBlockStorage.ensureLoaded();
+        if (id) {
+            const subBlock = await subBlockStorage.getByUserId(id, userId);
+            if (!subBlock) {
+                return NextResponse.json({ error: 'Sub-block not found' }, { status: 404 });
+            }
+            return NextResponse.json(subBlock);
+        }
+
         if (!blockId) {
             return NextResponse.json({ error: 'blockId is required' }, { status: 400 });
         }
-
-        await subBlockStorage.ensureLoaded();
         const subBlocks = await subBlockStorage.getAllByBlockId(blockId, userId);
         return NextResponse.json(subBlocks);
     } catch (error: any) {

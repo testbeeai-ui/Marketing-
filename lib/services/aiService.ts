@@ -58,9 +58,7 @@ export class AIService {
       'gemini-3-pro-image-preview',
       'gemini-3-pro-preview',
       'gemini-3-flash-preview',
-      'gemini-3-pro',
-      'gemini-3-flash',
-      'gemini-experimental' // Added as potential mapping for latest preview
+      'gemini-1.5-pro'
     ];
 
     // Note: We don't verify them all at startup to save time/quota, but we log the configuration

@@ -415,11 +415,7 @@ const Workspace = () => {
                     setViewMode("cards");
                   }}
                   onStoriesGenerated={() => {
-                    // After stories are generated, switch to detail view
                     queryClient.invalidateQueries({ queryKey: ['sub-blocks', blockId] });
-                    setTimeout(() => {
-                      setViewMode("detail");
-                    }, 500);
                   }}
                 />
               )}

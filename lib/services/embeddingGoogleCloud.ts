@@ -1,6 +1,13 @@
 /**
  * Embedding service using Google Cloud Vertex AI
- */
+ * 
+ * NOTE: This service uses gemini-embedding-001 for generating embeddings (vector representations of text).
+ * This is DIFFERENT from the Gemini model (gemini-3-flash) which is used for text generation.
+ * 
+ * - gemini-embedding-001: Converts text → vectors (for similarity search) [LATEST MODEL]
+ * - gemini-3-flash: Converts text → text (for story generation)
+ *Uses text-embedding-005 model (NOT Gemini - Gemini is for text generation)
+ **/
 import { PredictionServiceClient } from '@google-cloud/aiplatform';
 import { helpers } from '@google-cloud/aiplatform';
 import path from 'path';
@@ -20,7 +27,7 @@ export class GoogleCloudEmbeddingService {
   private projectId: string;
   private location: string;
   private endpoint: string;
-  private readonly EMBEDDING_DIMENSION = 768; // text-embedding-004 produces 768-dimensional vectors
+  private readonly EMBEDDING_DIMENSION = 1536;
 
   constructor() {
     this.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || '';
@@ -34,21 +41,36 @@ export class GoogleCloudEmbeddingService {
       );
     }
 
-    // Set credentials path if provided
-    const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    if (credentialsPath) {
-      // Ensure absolute path
-      const fullPath = path.isAbsolute(credentialsPath)
-        ? credentialsPath
-        : path.resolve(process.cwd(), credentialsPath); // Use process.cwd() instead of __dirname
-      
-      process.env.GOOGLE_APPLICATION_CREDENTIALS = fullPath;
-      console.log(`[Embedding] Using credentials from: ${fullPath}`);
+    const credentialsBase64 = process.env.GOOGLE_CLOUD_CREDENTIALS_BASE64;
+    if (!credentialsBase64) {
+      throw new Error(
+        'GOOGLE_CLOUD_CREDENTIALS_BASE64 environment variable is required for Google Cloud. ' +
+        'Set it in your .env file with base64-encoded service account JSON.'
+      );
+    }
+
+    let credentials: { client_email?: string; private_key?: string } = {};
+    try {
+      const credentialsJson = Buffer.from(credentialsBase64, 'base64').toString('utf-8');
+      const parsed = JSON.parse(credentialsJson);
+      credentials = {
+        client_email: parsed.client_email,
+        private_key: parsed.private_key
+      };
+      if (!credentials.client_email || !credentials.private_key) {
+        throw new Error('Missing client_email or private_key in credentials');
+      }
+      console.log(`[Embedding] Using credentials from .env (base64)`);
+    } catch (error) {
+      throw new Error(
+        `Failed to decode Google Cloud credentials from base64: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
 
     try {
       this.client = new PredictionServiceClient({
         apiEndpoint: this.endpoint,
+        credentials
       });
       console.log(`[Embedding] Google Cloud Vertex AI client initialized for project: ${this.projectId}`);
     } catch (error) {
@@ -59,8 +81,8 @@ export class GoogleCloudEmbeddingService {
 
   async generateEmbedding(text: string): Promise<number[]> {
     try {
-      // Using text-embedding-004
-      const modelName = `projects/${this.projectId}/locations/${this.location}/publishers/google/models/text-embedding-004`;
+      // Using gemini-embedding-001 (latest embedding model - DIFFERENT from Gemini generation models)
+      const modelName = `projects/${this.projectId}/locations/${this.location}/publishers/google/models/gemini-embedding-001`;
 
       // Prepare the instance for Vertex AI
       const instance = helpers.toValue({
@@ -103,6 +125,10 @@ export class GoogleCloudEmbeddingService {
             );
           }
 
+          if (embedding.length > this.EMBEDDING_DIMENSION) {
+            return embedding.slice(0, this.EMBEDDING_DIMENSION);
+          }
+
           return embedding;
         } catch (error: any) {
           const errorMessage = error.message || '';
@@ -128,7 +154,7 @@ export class GoogleCloudEmbeddingService {
       if (errorMessage.includes('credentials') || errorMessage.includes('authentication')) {
         throw new Error(
           `Google Cloud authentication failed: ${errorMessage}. ` +
-          `Make sure GOOGLE_APPLICATION_CREDENTIALS points to a valid service account key file.`
+          `Make sure GOOGLE_CLOUD_CREDENTIALS_BASE64 is set to a valid service account JSON.`
         );
       }
 

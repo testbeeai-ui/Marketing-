@@ -20,7 +20,7 @@ export async function createAuthenticatedClient(): Promise<SupabaseClient> {
                         );
                     } catch {
                         // The `setAll` method was called from a Server Component.
-                        // This can be ignored if you have middleware refreshing
+                        // This can be ignored if you have proxy refreshing
                         // user sessions.
                     }
                 },

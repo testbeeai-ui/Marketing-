@@ -290,10 +290,10 @@ export const storiesApi = {
   },
 
   like: async (storyId: string, storyContent: string, styleType: 'professional' | 'viral' | 'storyteller'): Promise<void> => {
-    const response = await fetch(`${API_BASE}/stories/${storyId}/like`, {
+    const response = await fetch(`${API_BASE}/stories`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ storyContent, styleType }),
+      body: JSON.stringify({ action: 'like', storyId, storyContent, styleType }),
     });
 
     if (!response.ok) {
@@ -303,10 +303,10 @@ export const storiesApi = {
   },
 
   dislike: async (storyId: string, storyContent: string, styleType: 'professional' | 'viral' | 'storyteller'): Promise<void> => {
-    const response = await fetch(`${API_BASE}/stories/${storyId}/dislike`, {
+    const response = await fetch(`${API_BASE}/stories`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ storyContent, styleType }),
+      body: JSON.stringify({ action: 'dislike', storyId, storyContent, styleType }),
     });
 
     if (!response.ok) {
@@ -327,7 +327,7 @@ export const contentApi = {
     const response = await fetch(`${API_BASE}/content`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ storyId, storyContent, platforms, imageContext }),
+      body: JSON.stringify({ action: 'generate', storyId, storyContent, platforms, imageContext }),
     });
 
     if (!response.ok) {
@@ -335,7 +335,8 @@ export const contentApi = {
       throw new Error(error.error || 'Failed to generate content');
     }
 
-    return response.json();
+    const data = await response.json();
+    return data.contents || {};
   },
 
   like: async (caption: string, platform: string): Promise<void> => {
@@ -379,7 +380,8 @@ export const imagesApi = {
       throw new Error(error.error || 'Failed to generate prompt');
     }
 
-    return response.json();
+    const data = await response.json();
+    return { prompt: data.prompt ?? data.enhancedPrompt };
   },
 
   generate: async (prompt: string, width?: number, height?: number, platform?: string): Promise<{ enhancedPrompt: string; imageUrl?: string; platform?: string }> => {

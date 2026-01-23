@@ -56,8 +56,16 @@ export class FileProcessor {
     if (mimetype && docxMimeTypes.includes(mimetype.toLowerCase()) || fileExtension === '.docx' || fileExtension === '.doc') {
       try {
         console.log(`[FileProcessor] Using mammoth to process ${name || 'document'} (${mimetype})`);
-        // Convert content string back to buffer for mammoth
-        const buffer = Buffer.from(content, 'utf-8');
+        // Handle base64 content for binary files
+        let buffer: Buffer;
+        if (content.startsWith('data:') || /^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
+          // Base64 encoded content (binary files)
+          const base64Data = content.startsWith('data:') ? content.split(',')[1] : content;
+          buffer = Buffer.from(base64Data, 'base64');
+        } else {
+          // Text content
+          buffer = Buffer.from(content, 'utf-8');
+        }
         const result = await mammoth.extractRawText({ buffer });
         console.log(`[FileProcessor] Mammoth extracted ${result.value.length} characters from ${name || 'document'}`);
         return {
@@ -82,8 +90,16 @@ export class FileProcessor {
     const tempFilePath = path.join(tempDir, `docling-${Date.now()}-${safeName}`);
 
     try {
-      // Convert content string back to buffer for file writing
-      const buffer = Buffer.from(content, 'utf-8');
+      // Handle base64 content for binary files
+      let buffer: Buffer;
+      if (content.startsWith('data:') || /^[A-Za-z0-9+/]*={0,2}$/.test(content)) {
+        // Base64 encoded content (binary files)
+        const base64Data = content.startsWith('data:') ? content.split(',')[1] : content;
+        buffer = Buffer.from(base64Data, 'base64');
+      } else {
+        // Text content
+        buffer = Buffer.from(content, 'utf-8');
+      }
       await fs.writeFile(tempFilePath, buffer);
       console.log(`[FileProcessor] Using Docling to process ${name || 'document'} (${mimetype})`);
 

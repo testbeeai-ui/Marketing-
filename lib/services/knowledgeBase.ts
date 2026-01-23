@@ -77,6 +77,39 @@ export class KnowledgeBase {
     return (data || []).map(this.mapFromDb);
   }
 
+  async getDocumentsByUserId(userId: string): Promise<Document[]> {
+    // Get user's blocks first
+    const { data: blocksData, error: blocksError } = await this.db
+      .from('blocks')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (blocksError) {
+      console.error(`[KnowledgeBase] Error fetching blocks for user ${userId}:`, blocksError);
+      return [];
+    }
+
+    if (!blocksData || blocksData.length === 0) {
+      return [];
+    }
+
+    const blockIds = blocksData.map(block => block.id);
+
+    // Then get documents for those blocks
+    const { data, error } = await this.db
+      .from('documents')
+      .select('*')
+      .in('block_id', blockIds)
+      .order('uploaded_at', { ascending: false });
+
+    if (error) {
+      console.error(`[KnowledgeBase] Error fetching documents for user ${userId}:`, error);
+      return [];
+    }
+
+    return (data || []).map(this.mapFromDb);
+  }
+
   async getDocumentsMetadataByBlockIds(blockIds: string[]): Promise<{ blockId: string; status: string }[]> {
     if (blockIds.length === 0) return [];
 
@@ -104,6 +137,44 @@ export class KnowledgeBase {
 
     if (error) {
       console.error(`[KnowledgeBase] Failed to delete document ${id}:`, error);
+      throw new Error(`Failed to delete document: ${error.message}`);
+    }
+  }
+
+  async deleteDocumentByFileIdAndUserId(fileId: string, userId: string): Promise<void> {
+    // First verify the document belongs to the user by checking the block
+    const { data: documentData, error: verifyError } = await this.db
+      .from('documents')
+      .select('block_id')
+      .eq('id', fileId)
+      .single();
+
+    if (verifyError || !documentData) {
+      console.error(`[KnowledgeBase] Document ${fileId} not found or error verifying ownership:`, verifyError);
+      throw new Error(`Document not found or access denied`);
+    }
+
+    // Check if the block belongs to the user
+    const { data: blockData, error: blockError } = await this.db
+      .from('blocks')
+      .select('id')
+      .eq('id', documentData.block_id)
+      .eq('user_id', userId)
+      .single();
+
+    if (blockError || !blockData) {
+      console.error(`[KnowledgeBase] Block ${documentData.block_id} not found or does not belong to user ${userId}:`, blockError);
+      throw new Error(`Document not found or access denied`);
+    }
+
+    // Now delete the document
+    const { error } = await this.db
+      .from('documents')
+      .delete()
+      .eq('id', fileId);
+
+    if (error) {
+      console.error(`[KnowledgeBase] Failed to delete document ${fileId} for user ${userId}:`, error);
       throw new Error(`Failed to delete document: ${error.message}`);
     }
   }

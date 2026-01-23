@@ -16,9 +16,14 @@ export async function POST(request: NextRequest) {
     // Parse form data
     const formData = await request.formData();
     const file = formData.get('file') as File;
+    const documentBlockId = formData.get('blockId') as string;
     
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    }
+    
+    if (!documentBlockId) {
+      return NextResponse.json({ error: 'No blockId provided' }, { status: 400 });
     }
 
     // Validate file size (10MB limit)
@@ -41,9 +46,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 });
     }
 
+    // Ensure block exists for this user
+    await blockStorage.ensureLoaded();
+    const existingBlock = await blockStorage.getByUserId(documentBlockId, userId);
+    if (!existingBlock) {
+      return NextResponse.json({ error: 'Block not found' }, { status: 404 });
+    }
+
     // Process the file
     const buffer = await file.arrayBuffer();
-    const content = new TextDecoder().decode(buffer);
+    
+    // Handle different file types appropriately
+    let content: string;
+    const isTextFile = file.type.startsWith('text/') || 
+                      file.type === 'application/json' ||
+                      file.type === 'application/javascript' ||
+                      file.type === 'application/typescript';
+    
+    if (isTextFile) {
+      content = new TextDecoder().decode(buffer);
+    } else {
+      // For binary files (PDF, DOCX), convert to base64 for processing
+      content = Buffer.from(buffer).toString('base64');
+    }
     
     // Create file record
     const fileRecord = await fileProcessor.processFile({
@@ -54,38 +79,50 @@ export async function POST(request: NextRequest) {
       userId
     });
 
-    // Store in knowledge base
-    const knowledgeItem = await knowledgeBase.addFile({
-      fileId: fileRecord.id,
-      userId,
-      content,
-      metadata: {
-        name: file.name,
-        type: file.type,
-        size: file.size
-      }
+    const extractedText = fileRecord.content;
+
+    // Store in knowledge base as a document
+    const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    await knowledgeBase.addDocument({
+      id: documentId,
+      blockId: documentBlockId, // Use the actual blockId from form data
+      fileName: file.name,
+      content: extractedText,
+      fileSize: extractedText.length,
+      uploadedAt: new Date().toISOString(),
+      status: 'ready'
     });
 
-    // Generate vectors for the content
-    const vectors = await vectorStore.generateVectors(content);
-    await vectorStore.storeVectors({
-      contentId: knowledgeItem.id,
-      vectors,
-      userId
-    });
-
-    // Create blocks from the content
-    const blocks = await blockStorage.createBlocksFromContent({
-      content,
-      fileId: fileRecord.id,
-      userId
-    });
+    // Generate vectors for the content (chunked)
+    const chunks = fileProcessor.chunkText(extractedText, 2000, 200);
+    
+    // Store each chunk as a vector
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkId = `chunk_${documentId}_${i}`;
+      await vectorStore.storeChunk(
+        chunkId,
+        userId,
+        documentBlockId,
+        documentId,
+        chunks[i],
+        {
+          fileName: file.name,
+          chunkIndex: i
+        }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       file: fileRecord,
-      knowledgeItem,
-      blocksCreated: blocks.length
+      document: {
+        id: documentId,
+        fileName: file.name,
+        fileSize: extractedText.length,
+        uploadedAt: new Date().toISOString(),
+        status: 'ready'
+      },
+      blocksCreated: 0
     });
 
   } catch (error) {
@@ -104,10 +141,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get user's files
-    const files = await fileProcessor.getUserFiles(userId);
+    const { searchParams } = new URL(request.url);
+    const blockId = searchParams.get('blockId');
+
+    let files;
+    if (blockId) {
+      // Get files for specific block (for backward compatibility)
+      files = await knowledgeBase.getDocumentsByBlock(blockId);
+    } else {
+      // Get all user's files (new functionality)
+      files = await knowledgeBase.getDocumentsByUserId(userId);
+    }
     
-    return NextResponse.json({ files });
+    return NextResponse.json(files);
 
   } catch (error) {
     console.error('Get files error:', error);
@@ -133,11 +179,8 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Delete file and related data
-    await fileProcessor.deleteFile(fileId, userId);
-    await knowledgeBase.removeFile(fileId, userId);
-    await vectorStore.deleteVectors(fileId, userId);
-    await blockStorage.deleteFileBlocks(fileId, userId);
-
+    await knowledgeBase.deleteDocumentByFileIdAndUserId(fileId, userId);
+    await vectorStore.deleteByFileId(fileId);
     return NextResponse.json({ success: true });
 
   } catch (error) {

@@ -74,8 +74,8 @@ export async function POST(request: NextRequest) {
 
         // Generate content
         if (action === 'generate') {
-            if (!storyId || !storyContent || !platforms || !Array.isArray(platforms)) {
-                return NextResponse.json({ error: 'storyId, storyContent, and platforms are required' }, { status: 400 });
+            if (!platforms || !Array.isArray(platforms) || (!storyId && !storyContent)) {
+                return NextResponse.json({ error: 'storyId or storyContent and platforms are required' }, { status: 400 });
             }
 
             const contents = await contentCreator.generateContent({

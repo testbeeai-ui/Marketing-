@@ -20,7 +20,7 @@ interface VectorChunk {
  */
 export class VectorStore {
   private embeddingService: EmbeddingService;
-  private readonly EMBEDDING_DIMENSION = 768; // Google Cloud text-embedding-004 dimension
+  private readonly EMBEDDING_DIMENSION = 1536;
 
   constructor() {
     this.embeddingService = new EmbeddingService();
@@ -93,32 +93,12 @@ export class VectorStore {
       // Generate embedding for the query
       const queryEmbedding = await this.embeddingService.generateEmbedding(query);
       
-      // Build the SQL query with vector similarity
-      let sqlQuery = `
-        SELECT id, user_id, block_id, file_id, text, metadata, 
-               1 - (embedding <=> $1) as similarity
-        FROM vector_chunks
-        WHERE 1 - (embedding <=> $1) > $2
-      `;
-      
-      const params: any[] = [queryEmbedding, similarityThreshold];
-      
-      if (userId) {
-        sqlQuery += ` AND user_id = $${params.length + 1}`;
-        params.push(userId);
-      }
-      
-      if (blockId) {
-        sqlQuery += ` AND block_id = $${params.length + 1}`;
-        params.push(blockId);
-      }
-      
-      sqlQuery += ` ORDER BY embedding <=> $1 LIMIT $${params.length + 1}`;
-      params.push(limit);
-
-      const { data, error } = await supabase.rpc('execute_sql', {
-        query: sqlQuery,
-        params: params
+      const { data, error } = await supabase.rpc('match_vector_chunks', {
+        query_embedding: queryEmbedding,
+        match_threshold: similarityThreshold,
+        match_count: limit,
+        match_block_id: blockId || '',
+        match_user_id: userId || null
       });
 
       if (error) {
