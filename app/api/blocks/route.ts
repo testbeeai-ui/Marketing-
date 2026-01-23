@@ -4,7 +4,7 @@ import { knowledgeBase } from '@/lib/services/knowledgeBase';
 import { vectorStore } from '@/lib/services/vectorStore';
 import { storyCache } from '@/lib/services/storyCache';
 import { subBlockStorage } from '@/lib/services/subBlockStorage';
-import { getNumericUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
+import { getUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
 
 function getRelativeTime(dateString: string): string {
     const date = new Date(dateString);
@@ -23,9 +23,9 @@ function getRelativeTime(dateString: string): string {
 // GET /api/blocks - Get all blocks or single block with ?id=xxx
 export async function GET(request: NextRequest) {
     try {
-        const userId = await getNumericUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
         const supabase = await createAuthenticatedClient();
-        console.log(`[API] GET /api/blocks - Numeric User ID: ${userId}`);
+        console.log(`[API] GET /api/blocks - User ID: ${userId}`);
         
         if (!userId) {
             console.warn('[API] Authentication failed: No user ID derived from token');
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
 // POST /api/blocks - Create new block
 export async function POST(request: NextRequest) {
     try {
-        const userId = await getNumericUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
         const supabase = await createAuthenticatedClient();
         if (!userId) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
 // PUT /api/blocks - Update block (requires id in body)
 export async function PUT(request: NextRequest) {
     try {
-        const userId = await getNumericUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
         const supabase = await createAuthenticatedClient();
         if (!userId) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
@@ -183,7 +183,7 @@ export async function PUT(request: NextRequest) {
 // DELETE /api/blocks?id=xxx
 export async function DELETE(request: NextRequest) {
     try {
-        const userId = await getNumericUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
         const supabase = await createAuthenticatedClient();
         if (!userId) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });

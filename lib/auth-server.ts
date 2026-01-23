@@ -57,17 +57,9 @@ export async function getUserIdFromRequest(request: NextRequest): Promise<string
     }
 }
 
-export async function getNumericUserIdFromRequest(request: NextRequest): Promise<number | null> {
-    try {
-        const userId = await getUserIdFromRequest(request);
-        if (!userId) return null;
-
-        // Convert UUID to numeric ID for backend compatibility
-        return parseInt(userId.replace(/-/g, '').substring(0, 15), 16) % 2147483647;
-    } catch (error) {
-        console.error('Error getting numeric user ID:', error);
-        return null;
-    }
+export async function getNumericUserIdFromRequest(request: NextRequest): Promise<string | null> {
+    // Return the UUID directly instead of converting to numeric
+    return getUserIdFromRequest(request);
 }
 
 export async function getAuthenticatedUser(request: NextRequest): Promise<{ user: any, supabase: SupabaseClient } | null> {

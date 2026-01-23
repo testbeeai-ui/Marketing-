@@ -3,7 +3,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 
 export interface Block {
   id: string;
-  userId: number; // User ID that owns this block
+  userId: string; // Changed from number to string to match UUID
   name: string;
   description: string;
   createdAt: string;
@@ -41,7 +41,7 @@ export class BlockStorage {
     return (data || []).map(this.mapFromDb);
   }
 
-  async getAllByUserId(userId: number, client?: SupabaseClient): Promise<Block[]> {
+  async getAllByUserId(userId: string, client?: SupabaseClient): Promise<Block[]> {
     console.log(`[BlockStorage] Querying blocks for user_id: ${userId}`);
     const { data, error } = await this.getDb(client)
       .from('blocks')
@@ -76,7 +76,7 @@ export class BlockStorage {
     return this.mapFromDb(data);
   }
 
-  async getByUserId(id: string, userId: number, client?: SupabaseClient): Promise<Block | undefined> {
+  async getByUserId(id: string, userId: string, client?: SupabaseClient): Promise<Block | undefined> {
     const { data, error } = await this.getDb(client)
       .from('blocks')
       .select('*')
