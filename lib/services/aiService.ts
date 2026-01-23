@@ -55,6 +55,9 @@ export class AIService {
     // User requested strict usage of Gemini 3 models ONLY
     // WARNING: If these 404, the app will fail to generate content.
     const priorityModels = [
+      'gemini-3-pro-image-preview',
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
       'gemini-3-pro',
       'gemini-3-flash',
       'gemini-experimental' // Added as potential mapping for latest preview
