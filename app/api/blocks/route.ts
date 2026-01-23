@@ -4,7 +4,7 @@ import { knowledgeBase } from '@/lib/services/knowledgeBase';
 import { vectorStore } from '@/lib/services/vectorStore';
 import { storyCache } from '@/lib/services/storyCache';
 import { subBlockStorage } from '@/lib/services/subBlockStorage';
-import { getNumericUserIdFromRequest } from '@/lib/auth-server';
+import { getNumericUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
 
 function getRelativeTime(dateString: string): string {
     const date = new Date(dateString);
@@ -24,6 +24,7 @@ function getRelativeTime(dateString: string): string {
 export async function GET(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
+        const supabase = await createAuthenticatedClient();
         console.log(`[API] GET /api/blocks - Numeric User ID: ${userId}`);
         
         if (!userId) {
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
 
         if (id) {
             console.log(`[API] Fetching specific block ${id} for user ${userId}`);
-            const block = await blockStorage.getByUserId(id, userId);
+            const block = await blockStorage.getByUserId(id, userId, supabase);
             if (!block) {
                 console.warn(`[API] Block ${id} not found for user ${userId}`);
                 return NextResponse.json({ error: 'Block not found' }, { status: 404 });
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
         }
 
         console.log(`[API] Fetching all blocks for user ${userId}`);
-        const blocksArray = await blockStorage.getAllByUserId(userId);
+        const blocksArray = await blockStorage.getAllByUserId(userId, supabase);
         console.log(`[API] Found ${blocksArray.length} blocks for user ${userId}`);
         
         // Optimization: Fetch all related data in parallel (3 DB calls total instead of N+1)
@@ -102,6 +103,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
+        const supabase = await createAuthenticatedClient();
         if (!userId) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
         }
@@ -125,7 +127,7 @@ export async function POST(request: NextRequest) {
             updatedAt: now,
         };
 
-        const createdBlock = await blockStorage.create(block);
+        const createdBlock = await blockStorage.create(block, supabase);
         console.log('Block created successfully:', createdBlock.id, createdBlock.name);
 
         return NextResponse.json({
@@ -144,6 +146,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
+        const supabase = await createAuthenticatedClient();
         if (!userId) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
         }
@@ -153,7 +156,7 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Block id is required' }, { status: 400 });
         }
 
-        const block = await blockStorage.getByUserId(id, userId);
+        const block = await blockStorage.getByUserId(id, userId, supabase);
         if (!block) {
             return NextResponse.json({ error: 'Block not found' }, { status: 404 });
         }
@@ -162,7 +165,7 @@ export async function PUT(request: NextRequest) {
         if (description !== undefined) block.description = description.trim();
         block.updatedAt = new Date().toISOString();
 
-        await blockStorage.update(block);
+        await blockStorage.update(block, supabase);
 
         const files = await knowledgeBase.getDocumentsByBlock(block.id);
         return NextResponse.json({
@@ -181,6 +184,7 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
+        const supabase = await createAuthenticatedClient();
         if (!userId) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
         }
@@ -192,7 +196,7 @@ export async function DELETE(request: NextRequest) {
         }
 
         console.log(`[API] Deleting block ${id} for user ${userId}`);
-        const block = await blockStorage.getByUserId(id, userId);
+        const block = await blockStorage.getByUserId(id, userId, supabase);
         
         if (!block) {
             console.warn(`[API] Block ${id} not found for user ${userId} - cannot delete`);
@@ -222,7 +226,7 @@ export async function DELETE(request: NextRequest) {
         await subBlockStorage.deleteByBlockId(block.id, userId);
         
         // 5. Finally delete the block itself
-        await blockStorage.delete(block.id);
+        await blockStorage.delete(block.id, supabase);
 
         console.log(`[API] Block ${id} deleted successfully`);
         return NextResponse.json({ success: true });

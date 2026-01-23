@@ -1,4 +1,5 @@
 import { supabase } from '../db/client';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 export interface Block {
   id: string;
@@ -14,7 +15,8 @@ export interface Block {
  */
 export class BlockStorage {
 
-  private get db() {
+  private getDb(client?: SupabaseClient) {
+    if (client) return client;
     if (!supabase) {
       throw new Error('Supabase client not initialized. Check environment variables.');
     }
@@ -26,8 +28,8 @@ export class BlockStorage {
     return Promise.resolve();
   }
 
-  async getAll(): Promise<Block[]> {
-    const { data, error } = await this.db
+  async getAll(client?: SupabaseClient): Promise<Block[]> {
+    const { data, error } = await this.getDb(client)
       .from('blocks')
       .select('*');
 
@@ -39,9 +41,9 @@ export class BlockStorage {
     return (data || []).map(this.mapFromDb);
   }
 
-  async getAllByUserId(userId: number): Promise<Block[]> {
+  async getAllByUserId(userId: number, client?: SupabaseClient): Promise<Block[]> {
     console.log(`[BlockStorage] Querying blocks for user_id: ${userId}`);
-    const { data, error } = await this.db
+    const { data, error } = await this.getDb(client)
       .from('blocks')
       .select('*')
       .eq('user_id', userId)
@@ -56,8 +58,8 @@ export class BlockStorage {
     return (data || []).map(this.mapFromDb);
   }
 
-  async get(id: string): Promise<Block | undefined> {
-    const { data, error } = await this.db
+  async get(id: string, client?: SupabaseClient): Promise<Block | undefined> {
+    const { data, error } = await this.getDb(client)
       .from('blocks')
       .select('*')
       .eq('id', id)
@@ -74,8 +76,8 @@ export class BlockStorage {
     return this.mapFromDb(data);
   }
 
-  async getByUserId(id: string, userId: number): Promise<Block | undefined> {
-    const { data, error } = await this.db
+  async getByUserId(id: string, userId: number, client?: SupabaseClient): Promise<Block | undefined> {
+    const { data, error } = await this.getDb(client)
       .from('blocks')
       .select('*')
       .eq('id', id)
@@ -92,8 +94,8 @@ export class BlockStorage {
     return this.mapFromDb(data);
   }
 
-  async create(block: Block): Promise<Block> {
-    const { error } = await this.db
+  async create(block: Block, client?: SupabaseClient): Promise<Block> {
+    const { error } = await this.getDb(client)
       .from('blocks')
       .insert({
         id: block.id,
@@ -111,8 +113,8 @@ export class BlockStorage {
     return block;
   }
 
-  async update(block: Block): Promise<Block> {
-    const { error } = await this.db
+  async update(block: Block, client?: SupabaseClient): Promise<Block> {
+    const { error } = await this.getDb(client)
       .from('blocks')
       .update({
         name: block.name,
@@ -132,8 +134,8 @@ export class BlockStorage {
     };
   }
 
-  async delete(id: string): Promise<void> {
-    const { error } = await this.db
+  async delete(id: string, client?: SupabaseClient): Promise<void> {
+    const { error } = await this.getDb(client)
       .from('blocks')
       .delete()
       .eq('id', id);
@@ -144,8 +146,8 @@ export class BlockStorage {
     }
   }
 
-  async exists(id: string): Promise<boolean> {
-    const { count, error } = await this.db
+  async exists(id: string, client?: SupabaseClient): Promise<boolean> {
+    const { count, error } = await this.getDb(client)
       .from('blocks')
       .select('*', { count: 'exact', head: true })
       .eq('id', id);
