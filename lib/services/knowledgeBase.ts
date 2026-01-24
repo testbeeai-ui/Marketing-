@@ -183,7 +183,7 @@ export class KnowledgeBase {
     return {
       id: row.id,
       blockId: row.block_id,
-      fileName: row.file_name,
+      fileName: row.file_name ?? row.name ?? row.fileName,
       content: row.content,
       fileSize: row.file_size,
       uploadedAt: row.uploaded_at,

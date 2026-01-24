@@ -50,6 +50,8 @@ export interface FileItem {
   id: string;
   name: string;
   status: 'ready' | 'indexing';
+  fileSize?: number;
+  uploadedAt?: string;
 }
 
 export interface StoryResponse {
@@ -260,7 +262,14 @@ export const filesApi = {
       throw new Error(error.error || `Failed to list files: ${response.statusText}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    return (data || []).map((file: any) => ({
+      id: file.id,
+      name: file.name ?? file.fileName ?? file.file_name ?? 'Untitled document',
+      status: file.status ?? 'ready',
+      fileSize: file.fileSize ?? file.file_size,
+      uploadedAt: file.uploadedAt ?? file.uploaded_at,
+    }));
   },
 };
 

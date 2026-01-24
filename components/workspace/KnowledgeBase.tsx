@@ -122,10 +122,10 @@ export const KnowledgeBase = ({
                       file.status === "completed" ? "text-emerald-500" : "text-primary"
                     )} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                      <p className="text-sm font-medium text-foreground truncate">
                         {file.name}
                       </p>
-                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                      <p className="text-xs text-muted-foreground mt-0.5">
                         {file.status === "uploading" && "Uploading..."}
                         {file.status === "processing" && "Processing document..."}
                         {file.status === "indexing" && "Creating embeddings..."}
@@ -271,16 +271,16 @@ export const KnowledgeBase = ({
               </div>
               
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
-                {file.name}
+                <p className="text-sm font-medium text-foreground truncate">
+                {file.name || "Untitled document"}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                  <span className="text-xs text-muted-foreground">
                     {formatFileSize(file.fileSize)}
                   </span>
                   {file.status === "indexing" && (
                     <>
-                      <span className="text-xs text-slate-600 dark:text-slate-400">•</span>
+                      <span className="text-xs text-muted-foreground">•</span>
                       <span className="text-xs text-blue-600 dark:text-blue-400 animate-pulse">
                         Indexing...
               </span>

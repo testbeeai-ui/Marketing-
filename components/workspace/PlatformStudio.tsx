@@ -35,6 +35,26 @@ const platforms = [
 
 const imagePlatforms: string[] = ['linkedin', 'twitter', 'instagram', 'facebook'];
 
+const getPlatformEntriesForVariation = (contents: Record<string, string>, variationId?: string): [string, string][] => {
+  const hasAnyPrefixed = Object.keys(contents).some(key => key.includes('.'));
+  if (!variationId) {
+    return hasAnyPrefixed ? [] : Object.entries(contents);
+  }
+  const prefix = `${variationId}.`;
+  const prefixed = Object.entries(contents)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => [key.slice(prefix.length), value] as [string, string]);
+  if (prefixed.length > 0) return prefixed;
+  if (hasAnyPrefixed) return [];
+  return Object.entries(contents).filter(([key]) => !key.includes('.'));
+};
+
+const prefixPlatformContents = (contents: Record<string, string>, variationId?: string): Record<string, string> => {
+  if (!variationId) return contents;
+  const prefix = `${variationId}.`;
+  return Object.fromEntries(Object.entries(contents).map(([key, value]) => [`${prefix}${key}`, value]));
+};
+
 // Platform image specifications with recommended dimensions and aspect ratios
 const platformImageSpecs: Record<string, { width: number; height: number; label: string; ratio: string; color: string }> = {
   linkedin: { width: 1200, height: 627, label: "1200×627", ratio: "1.91:1", color: "#0A66C2" },
@@ -92,18 +112,24 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
 
     try {
       const subBlock = await subBlocksApi.getById(subBlockId);
+      const platformContents = subBlock.platformContents || {};
+      const entries = getPlatformEntriesForVariation(platformContents, story?.id);
+      const hasPrefixedForCurrent = !!(story?.id && Object.keys(platformContents).some(key => key.startsWith(`${story.id}.`)));
+      const hasAnyPrefixed = Object.keys(platformContents).some(key => key.includes('.'));
+      const hasLegacy = Object.keys(platformContents).some(key => !key.includes('.'));
 
-      // CRITICAL: Check if the cached content was generated for the CURRENT variation
-      // If not, we must regenerate (don't use stale content from a different variation)
-      if (story?.id && subBlock.selectedVariationId !== story.id) {
+      if (hasAnyPrefixed && !hasPrefixedForCurrent) {
+        return null;
+      }
+
+      if (!hasPrefixedForCurrent && hasLegacy && story?.id && subBlock.selectedVariationId !== story.id) {
         console.log(`[PlatformStudio] Cache mismatch: cached variation "${subBlock.selectedVariationId}" != current "${story.id}". Regenerating.`);
         return null;
       }
 
-      if (subBlock.platformContents && Object.keys(subBlock.platformContents).length > 0) {
-        // Filter out image-related keys to get only text content
+      if (entries.length > 0) {
         const textContent: Record<string, string> = {};
-        Object.entries(subBlock.platformContents).forEach(([key, value]) => {
+        entries.forEach(([key, value]) => {
           if (!key.endsWith('_image') && key !== 'imageContext' && key !== 'image' && key !== 'imagePrompt') {
             textContent[key] = value;
           }
@@ -363,16 +389,15 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
         try {
           const subBlock = await subBlocksApi.getById(subBlockId);
           const currentContents = subBlock.platformContents || {};
+          const prefix = story?.id ? `${story.id}.` : "";
 
-          // Store images with platform prefix
           const updatedContents: Record<string, string> = { ...currentContents };
           Object.entries(results).forEach(([platform, imageData]) => {
             if (imageData.imageUrl) {
-              updatedContents[`${platform}_image`] = imageData.imageUrl;
+              updatedContents[`${prefix}${platform}_image`] = imageData.imageUrl;
             }
           });
-          // Also store the image context for later use
-          updatedContents.imageContext = JSON.stringify(results);
+          updatedContents[`${prefix}imageContext`] = JSON.stringify(results);
 
           await subBlocksApi.update(subBlockId, {
             platformContents: updatedContents,
@@ -514,9 +539,15 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
       // Save platform contents to sub-block if subBlockId is provided
       if (subBlockId && story) {
         try {
+          const subBlock = await subBlocksApi.getById(subBlockId);
+          const currentContents = subBlock.platformContents || {};
+          const prefixedContent = prefixPlatformContents(content, story.id);
           await subBlocksApi.update(subBlockId, {
             selectedVariationId: story.id,
-            platformContents: content,
+            platformContents: {
+              ...currentContents,
+              ...prefixedContent,
+            },
           });
         } catch (error) {
           console.error("Failed to save platform contents to sub-block:", error);
@@ -571,12 +602,14 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
             // Fetch current sub-block first to merge with existing contents
             const subBlock = await subBlocksApi.getById(subBlockId);
             const currentContents = subBlock.platformContents || {};
+            const prefix = story?.id ? `${story.id}.` : "";
 
             await subBlocksApi.update(subBlockId, {
+              selectedVariationId: story?.id,
               platformContents: {
                 ...currentContents,
-                image: fullUrl,
-                imagePrompt: imagePrompt // store prompt for reference
+                [`${prefix}image`]: fullUrl,
+                [`${prefix}imagePrompt`]: imagePrompt
               }
             });
           } catch (error) {
@@ -1484,10 +1517,10 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                                     }));
                                   }
 
-                                  // Update input with the enhanced detailed prompt so user sees it
+                                  const updatedPrompt = result.enhancedPrompt?.trim() ? result.enhancedPrompt : prompt;
                                   setPlatformImagePrompts(prev => ({
                                     ...prev,
-                                    [currentPlatform]: result.enhancedPrompt
+                                    [currentPlatform]: updatedPrompt
                                   }));
                                   setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'success' }));
                                   toast.success(`${currentPlatform} image generated!`);

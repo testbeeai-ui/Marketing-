@@ -25,6 +25,21 @@ function formatRelativeTime(dateString: string): string {
   return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
 }
 
+const getPlatformEntriesForVariation = (contents: Record<string, string> | undefined, variationId?: string): [string, string][] => {
+  if (!contents) return [];
+  const hasAnyPrefixed = Object.keys(contents).some(key => key.includes('.'));
+  if (!variationId) {
+    return hasAnyPrefixed ? [] : Object.entries(contents);
+  }
+  const prefix = `${variationId}.`;
+  const prefixed = Object.entries(contents)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => [key.slice(prefix.length), value] as [string, string]);
+  if (prefixed.length > 0) return prefixed;
+  if (hasAnyPrefixed) return [];
+  return Object.entries(contents).filter(([key]) => !key.includes('.'));
+};
+
 interface SubBlockCardProps {
   subBlock: SubBlock;
   onClick: () => void;
@@ -34,7 +49,9 @@ interface SubBlockCardProps {
 
 export const SubBlockCard = ({ subBlock, onClick, onDelete, onModify }: SubBlockCardProps) => {
   const hasStories = subBlock.storyVariations && subBlock.storyVariations.length > 0;
-  const hasPlatformContents = subBlock.platformContents && Object.keys(subBlock.platformContents).length > 0;
+  const platformEntries = getPlatformEntriesForVariation(subBlock.platformContents, subBlock.selectedVariationId);
+  const platformEntryCount = platformEntries.filter(([key]) => key !== 'imagePrompt' && key !== 'imageContext' && key !== 'image').length;
+  const hasPlatformContents = platformEntryCount > 0;
   const selectedVariation = subBlock.storyVariations?.find(v => v.id === subBlock.selectedVariationId);
 
   const handleContextMenuClick = (e: React.MouseEvent) => {
@@ -96,7 +113,7 @@ export const SubBlockCard = ({ subBlock, onClick, onDelete, onModify }: SubBlock
               <div className="flex items-center gap-2 text-sm">
                 <Sparkles className="w-4 h-4 text-primary" />
                 <span className="text-muted-foreground">
-                  {Object.keys(subBlock.platformContents || {}).length} platform format{Object.keys(subBlock.platformContents || {}).length > 1 ? 's' : ''}
+                  {platformEntryCount} platform format{platformEntryCount > 1 ? 's' : ''}
                 </span>
               </div>
             )}
