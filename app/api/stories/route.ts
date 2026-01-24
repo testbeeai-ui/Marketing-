@@ -41,9 +41,40 @@ export async function POST(request: NextRequest) {
         // Generate cache key from prompt and subBlockId
         const cacheKey = `story:${subBlockId || 'new'}:${prompt.substring(0, 50)}`;
         
+        const titleMap: Record<string, string> = {
+            professional: 'The Professional',
+            viral: 'The Viral',
+            storyteller: 'The Storyteller',
+        };
+
         // Check cache first
         const cached = storyCache.get(cacheKey);
         if (cached) {
+            if (subBlockId && userId) {
+                const existing = await subBlockStorage.getByUserId(subBlockId, userId);
+                if (existing) {
+                    const cachedVariations = (cached.structuredVariations || []).map((story: any) => ({
+                        id: story.id,
+                        title: titleMap[story.id] || story.title || story.id,
+                        content: story.content,
+                        selected: false,
+                    }));
+                    const fallbackVariations = Object.entries(cached.variations || {}).map(([id, content]) => ({
+                        id,
+                        title: titleMap[id] || id,
+                        content,
+                        selected: false,
+                    }));
+                    const storyVariations = cachedVariations.length > 0 ? cachedVariations : fallbackVariations;
+                    await subBlockStorage.update({
+                        ...existing,
+                        prompt: prompt.trim(),
+                        storyVariations,
+                        selectedVariationId: existing.selectedVariationId || storyVariations[0]?.id,
+                        updatedAt: new Date().toISOString(),
+                    });
+                }
+            }
             return NextResponse.json({ stories: cached.variations });
         }
 
@@ -77,6 +108,25 @@ export async function POST(request: NextRequest) {
             createdAt: Date.now()
         };
         storyCache.set(cacheKey, cacheData);
+
+        if (subBlockId && userId) {
+            const existing = await subBlockStorage.getByUserId(subBlockId, userId);
+            if (existing) {
+                const storyVariations = stories.map(story => ({
+                    id: story.id,
+                    title: titleMap[story.id] || story.title || story.id,
+                    content: story.content,
+                    selected: story.selected ?? false,
+                }));
+                await subBlockStorage.update({
+                    ...existing,
+                    prompt: prompt.trim(),
+                    storyVariations,
+                    selectedVariationId: existing.selectedVariationId || storyVariations[0]?.id,
+                    updatedAt: new Date().toISOString(),
+                });
+            }
+        }
 
         return NextResponse.json({ stories: variations });
     } catch (error: any) {

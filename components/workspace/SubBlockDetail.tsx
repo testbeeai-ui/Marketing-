@@ -44,6 +44,21 @@ const storyConfig = [
   },
 ];
 
+const getPlatformEntriesForVariation = (contents: Record<string, string> | undefined, variationId?: string): [string, string][] => {
+  if (!contents) return [];
+  const hasAnyPrefixed = Object.keys(contents).some(key => key.includes('.'));
+  if (!variationId) {
+    return hasAnyPrefixed ? [] : Object.entries(contents);
+  }
+  const prefix = `${variationId}.`;
+  const prefixed = Object.entries(contents)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => [key.slice(prefix.length), value] as [string, string]);
+  if (prefixed.length > 0) return prefixed;
+  if (hasAnyPrefixed) return [];
+  return Object.entries(contents).filter(([key]) => !key.includes('.'));
+};
+
 export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack, onGenerateNew }: SubBlockDetailProps) => {
   const queryClient = useQueryClient();
   const [selectedStory, setSelectedStory] = useState<{
@@ -55,7 +70,8 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
 
   const hasStories = subBlock.storyVariations && subBlock.storyVariations.length > 0;
   const selectedVariation = subBlock.storyVariations?.find(v => v.id === subBlock.selectedVariationId);
-  const hasPlatformContents = subBlock.platformContents && Object.keys(subBlock.platformContents).length > 0;
+  const platformEntries = getPlatformEntriesForVariation(subBlock.platformContents, subBlock.selectedVariationId);
+  const hasPlatformContents = platformEntries.length > 0;
 
   return (
     <>
@@ -218,9 +234,9 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
               <div className="mt-6">
                 <h3 className="text-sm font-medium text-muted-foreground mb-4">Platform Formats</h3>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  {Object.entries(subBlock.platformContents || {}).map(([platform, content]) => {
+                  {platformEntries.map(([platform, content]) => {
                     // Skip metadata keys
-                    if (platform === 'imagePrompt' || platform === 'imageContext') return null;
+                    if (platform === 'imagePrompt' || platform === 'imageContext' || platform === 'image') return null;
 
                     // Check if this is a platform image (format: platform_image)
                     const isPlatformImage = platform.endsWith('_image');
@@ -265,7 +281,7 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
                   })}
 
                   {/* Show placeholder only if no platform images exist */}
-                  {!Object.keys(subBlock.platformContents || {}).some(key => key.endsWith('_image')) && (
+                  {!platformEntries.some(([key]) => key.endsWith('_image')) && (
                     <motion.div
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}

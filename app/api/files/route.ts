@@ -80,13 +80,14 @@ export async function POST(request: NextRequest) {
     });
 
     const extractedText = fileRecord.content;
+    const storedFileName = file.name || fileRecord.name || 'Untitled document';
 
     // Store in knowledge base as a document
     const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     await knowledgeBase.addDocument({
       id: documentId,
       blockId: documentBlockId, // Use the actual blockId from form data
-      fileName: file.name,
+      fileName: storedFileName,
       content: extractedText,
       fileSize: extractedText.length,
       uploadedAt: new Date().toISOString(),
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
         documentId,
         chunks[i],
         {
-          fileName: file.name,
+          fileName: storedFileName,
           chunkIndex: i
         }
       );
@@ -117,7 +118,7 @@ export async function POST(request: NextRequest) {
       file: fileRecord,
       document: {
         id: documentId,
-        fileName: file.name,
+        fileName: storedFileName,
         fileSize: extractedText.length,
         uploadedAt: new Date().toISOString(),
         status: 'ready'
@@ -153,7 +154,15 @@ export async function GET(request: NextRequest) {
       files = await knowledgeBase.getDocumentsByUserId(userId);
     }
     
-    return NextResponse.json(files);
+    const normalizedFiles = (files || []).map((file: any) => ({
+      id: file.id,
+      name: file.name ?? file.fileName ?? file.file_name ?? 'Untitled document',
+      status: file.status ?? 'ready',
+      fileSize: file.fileSize ?? file.file_size,
+      uploadedAt: file.uploadedAt ?? file.uploaded_at,
+    }));
+
+    return NextResponse.json(normalizedFiles);
 
   } catch (error) {
     console.error('Get files error:', error);
