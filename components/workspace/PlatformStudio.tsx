@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Linkedin, Twitter, Instagram, Facebook, Copy, Check, Loader2, RefreshCw, ThumbsUp, ThumbsDown, Image as ImageIcon, Download, ArrowRight, MessageSquare, Repeat2, Heart, Share, AlertCircle, Bookmark } from "lucide-react";
+import { X, Linkedin, Twitter, Instagram, Facebook, Copy, Check, Loader2, RefreshCw, ThumbsUp, ThumbsDown, Image as ImageIcon, Download, ArrowRight, MessageSquare, Repeat2, Heart, Share, AlertCircle, Bookmark, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { authService } from "@/lib/auth";
 import { toast } from "sonner";
 import { renderMarkdown, getPlainText } from "@/lib/markdown";
 import { saveImage, getImageUrl, urlToBlob, getImagesForStory } from "@/lib/storage";
+import { LogoEditor, LogoPosition, LogoInstance } from "./LogoEditor";
 export type GenerationMode = "text" | "image-first";
 
 interface PlatformStudioProps {
@@ -97,6 +98,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   // Per-platform image prompts (editable by user)
   const [platformImagePrompts, setPlatformImagePrompts] = useState<Record<string, string>>({});
   const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
+  const [imageLoadErrors, setImageLoadErrors] = useState<Record<string, boolean>>({});
 
   const { toast: toastHook } = useToast();
 
@@ -105,6 +107,19 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   // Track the last loaded variation to prevent unnecessary regeneration
   const [lastLoadedVariationId, setLastLoadedVariationId] = useState<string | null>(null);
   const [hasLoadedCache, setHasLoadedCache] = useState(false);
+
+  // Modify Caption State
+  const [showModifyDialog, setShowModifyDialog] = useState(false);
+  const [modifyInstructions, setModifyInstructions] = useState("");
+  const [isModifying, setIsModifying] = useState(false);
+
+  // Modify Image State
+  const [showModifyImageDialog, setShowModifyImageDialog] = useState(false);
+  const [modifyImageInstructions, setModifyImageInstructions] = useState("");
+  const [isModifyingImage, setIsModifyingImage] = useState(false);
+  const [uploadedLogo, setUploadedLogo] = useState<{ base64: string; mimeType: string } | null>(null);
+  const [showLogoEditor, setShowLogoEditor] = useState(false);
+  const [editingImage, setEditingImage] = useState<{ url: string; platform: string; prompt: string } | null>(null);
 
   // Load cached content from sub-block (only if it matches current variation)
   const loadCachedContent = async () => {
@@ -129,16 +144,60 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
 
       if (entries.length > 0) {
         const textContent: Record<string, string> = {};
+        const cachedImages: Record<string, { enhancedPrompt: string; imageUrl?: string }> = {};
+        const cachedPrompts: Record<string, string> = {};
+
         entries.forEach(([key, value]) => {
-          if (!key.endsWith('_image') && key !== 'imageContext' && key !== 'image' && key !== 'imagePrompt') {
+          // Check for platform images (e.g., linkedin_image, twitter_image)
+          if (key.endsWith('_image')) {
+            const platform = key.replace('_image', '');
+            if (imagePlatforms.includes(platform) && value) {
+              cachedImages[platform] = {
+                enhancedPrompt: '',
+                imageUrl: value
+              };
+              console.log(`[PlatformStudio] Loaded cached image for ${platform}`);
+            }
+          }
+          // Check for platform image prompts (e.g., linkedin_imagePrompt)
+          else if (key.endsWith('_imagePrompt')) {
+            const platform = key.replace('_imagePrompt', '');
+            if (imagePlatforms.includes(platform) && value) {
+              cachedPrompts[platform] = value;
+              // Update the enhancedPrompt if we already have an image
+              if (cachedImages[platform]) {
+                cachedImages[platform].enhancedPrompt = value;
+              }
+            }
+          }
+          // Regular text content (not image-related)
+          else if (!key.endsWith('_image') && key !== 'imageContext' && key !== 'image' && key !== 'imagePrompt') {
             textContent[key] = value;
           }
         });
 
+        // Load cached images into state
+        if (Object.keys(cachedImages).length > 0) {
+          setPlatformImages(cachedImages);
+          console.log(`[PlatformStudio] Loaded ${Object.keys(cachedImages).length} cached platform images`);
+        }
+
+        // Load cached prompts into state
+        if (Object.keys(cachedPrompts).length > 0) {
+          setPlatformImagePrompts(cachedPrompts);
+          console.log(`[PlatformStudio] Loaded ${Object.keys(cachedPrompts).length} cached image prompts`);
+        }
+
         if (Object.keys(textContent).length > 0) {
           setGeneratedContent(textContent);
-          return textContent;
         }
+
+        // Return all loaded data so caller can make decisions
+        return {
+          textContent: Object.keys(textContent).length > 0 ? textContent : null,
+          cachedImages: Object.keys(cachedImages).length > 0 ? cachedImages : null,
+          cachedPrompts: Object.keys(cachedPrompts).length > 0 ? cachedPrompts : null,
+        };
       }
     } catch (error) {
       console.error("Failed to load cached content:", error);
@@ -167,38 +226,58 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
       // Try to load cached content for THIS variation first
       // Try to load cached content for THIS variation first
       const initializeContent = async () => {
-        const cachedContent = await loadCachedContent();
+        const cachedData = await loadCachedContent();
         setHasLoadedCache(true);
 
         if (isImageFirstMode) {
-          if (cachedContent) {
-            // We have content! Skip Step 1 (Text) and go to Step 2 (Prompts)
-            setImageFirstPhase("prompts");
+          if (cachedData) {
+            // We have cached data! Check what we loaded
+            const hasCachedImages = !!cachedData.cachedImages;
+            const hasCachedPrompts = !!cachedData.cachedPrompts;
+            const hasTextContent = !!cachedData.textContent;
 
-            // Populate prompts from cached content immediately
-            const platformStyles: Record<string, string> = {
-              linkedin: "Professional, clean, corporate style with business elements",
-              twitter: "Bold, eye-catching, high contrast with quick visual impact",
-              instagram: "Vibrant, visually stunning, aesthetic with rich colors",
-              facebook: "Engaging, shareable, warm and community-focused",
-            };
+            if (hasCachedImages) {
+              // We have cached images - go directly to images phase
+              console.log('[PlatformStudio] Found cached images, showing directly');
+              setImageFirstPhase("images");
+            } else if (hasCachedPrompts) {
+              // We have cached prompts but no images - go to prompts phase  
+              console.log('[PlatformStudio] Found cached prompts, showing prompts');
+              setImageFirstPhase("prompts");
+            } else if (hasTextContent) {
+              // No cached prompts - generate from text content
+              console.log('[PlatformStudio] No cached prompts, generating from text');
+              setImageFirstPhase("prompts");
 
-            const prompts: Record<string, string> = {};
-            imagePlatforms.forEach(platform => {
-              const text = cachedContent[platform];
-              if (text && text.length > 20 && !text.toLowerCase().includes("failed")) {
-                const style = platformStyles[platform] || "";
-                const contentSummary = text.substring(0, 150).replace(/\n/g, ' ').trim();
-                prompts[platform] = `${style}. Illustrating: ${contentSummary}`;
-              } else {
-                // Fallback
-                const style = platformStyles[platform] || "";
-                prompts[platform] = `${style}. Create an image for: ${story.title}`;
+              // Populate prompts from cached text content
+              const platformStyles: Record<string, string> = {
+                linkedin: "Professional, clean, corporate style with business elements",
+                twitter: "Bold, eye-catching, high contrast with quick visual impact",
+                instagram: "Vibrant, visually stunning, aesthetic with rich colors",
+                facebook: "Engaging, shareable, warm and community-focused",
+              };
+
+              const prompts: Record<string, string> = {};
+              imagePlatforms.forEach(platform => {
+                const text = cachedData.textContent?.[platform];
+                if (text && text.length > 20 && !text.toLowerCase().includes("failed")) {
+                  const style = platformStyles[platform] || "";
+                  const contentSummary = text.substring(0, 150).replace(/\n/g, ' ').trim();
+                  prompts[platform] = `${style}. Illustrating: ${contentSummary}`;
+                } else {
+                  // Fallback
+                  const style = platformStyles[platform] || "";
+                  prompts[platform] = `${style}. Create an image for: ${story.title}`;
+                }
+              });
+
+              if (Object.keys(prompts).length > 0) {
+                setPlatformImagePrompts(prompts);
               }
-            });
-
-            if (Object.keys(prompts).length > 0) {
-              setPlatformImagePrompts(prompts);
+            } else {
+              // No cache at all -> Start Step 1: Text Generation
+              setImageFirstPhase("text");
+              generateContent();
             }
           } else {
             // No cache -> Start Step 1: Text Generation
@@ -207,7 +286,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
           }
         } else {
           // TEXT ONLY MODE: Generate text content
-          if (!cachedContent) {
+          if (!cachedData?.textContent) {
             generateContent();
           }
           setImagePrompt(`A professional illustration for a story about: ${story.title}`);
@@ -681,6 +760,32 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
     }
   };
 
+  // Save platform image to database for persistence
+  const savePlatformImageToDatabase = async (platform: string, imageUrl: string, imagePrompt: string) => {
+    if (!subBlockId || !story?.id) {
+      console.warn('[PlatformStudio] Cannot save image: missing subBlockId or story.id');
+      return;
+    }
+
+    try {
+      const subBlock = await subBlocksApi.getById(subBlockId);
+      const currentContents = subBlock.platformContents || {};
+      const prefix = `${story.id}.`;
+
+      await subBlocksApi.update(subBlockId, {
+        selectedVariationId: story.id,
+        platformContents: {
+          ...currentContents,
+          [`${prefix}${platform}_image`]: imageUrl,
+          [`${prefix}${platform}_imagePrompt`]: imagePrompt,
+        },
+      });
+      console.log(`[PlatformStudio] Saved ${platform} image to database`);
+    } catch (error) {
+      console.error(`[PlatformStudio] Failed to save ${platform} image:`, error);
+    }
+  };
+
   const platform = platforms.find((p) => p.id === activePlatform);
   const currentContent = generatedContent[activePlatform] || "";
   const charCount = currentContent.length;
@@ -697,6 +802,226 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
       description: `Your ${platform?.name || 'platform'} content is ready to paste.`,
     });
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleModify = async () => {
+    if (!modifyInstructions.trim() || !currentContent) return;
+
+    // Store values before closing dialog
+    const instructions = modifyInstructions;
+    const targetPlatform = activePlatform;
+    const contentToModify = currentContent;
+
+    // Close dialog immediately and reset inputs
+    setShowModifyDialog(false);
+    setModifyInstructions("");
+
+    // Show modifying state
+    setIsModifying(true);
+
+    try {
+      const modifiedCaption = await contentApi.modify(contentToModify, targetPlatform, instructions);
+
+      // Update the generated content with the modified caption
+      setGeneratedContent(prev => ({
+        ...prev,
+        [targetPlatform]: modifiedCaption
+      }));
+
+      // Also regenerate the image prompt based on the new caption
+      try {
+        console.log('[PlatformStudio] Regenerating image prompt for modified caption...');
+        const promptResult = await imagesApi.generatePrompt(modifiedCaption, targetPlatform);
+
+        if (promptResult.prompt) {
+          console.log('[PlatformStudio] New prompt generated:', promptResult.prompt.substring(0, 50) + '...');
+
+          // Update image prompt for this platform
+          setPlatformImagePrompts(prev => ({
+            ...prev,
+            [targetPlatform]: promptResult.prompt
+          }));
+
+          // Also update platformImages if it exists to keep in sync
+          setPlatformImages(prev => ({
+            ...prev,
+            [targetPlatform]: {
+              ...prev[targetPlatform],
+              enhancedPrompt: promptResult.prompt
+            }
+          }));
+
+          // Force expand the prompt so user sees the change
+          setPromptExpanded(true);
+          toast.success("Image prompt updated to match caption");
+        }
+      } catch (promptError) {
+        console.error("Failed to regenerate image prompt:", promptError);
+        toast.warning("Caption updated, but failed to refresh image prompt");
+      }
+
+      // Save to sub-block if available
+      if (subBlockId && story) {
+        try {
+          const subBlock = await subBlocksApi.getById(subBlockId);
+          const currentContents = subBlock.platformContents || {};
+          const prefix = story.id ? `${story.id}.` : "";
+
+          await subBlocksApi.update(subBlockId, {
+            platformContents: {
+              ...currentContents,
+              [`${prefix}${targetPlatform}`]: modifiedCaption,
+            },
+          });
+        } catch (error) {
+          console.error("Failed to save modified caption to sub-block:", error);
+        }
+      }
+
+      toast.success("Caption & image prompt updated!");
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to modify caption";
+      toast.error(errorMessage);
+    } finally {
+      setIsModifying(false);
+    }
+  };
+
+  const handleModifyImage = async () => {
+    if (!modifyImageInstructions.trim()) return;
+
+    const currentImageData = platformImages[activePlatform];
+    if (!currentImageData?.imageUrl) {
+      toast.error("No image to modify");
+      return;
+    }
+
+    // Store values before closing dialog
+    const instructions = modifyImageInstructions;
+    const logoData = uploadedLogo;
+    const targetPlatform = activePlatform;
+
+    // Close dialog immediately and reset inputs
+    setShowModifyImageDialog(false);
+    setModifyImageInstructions("");
+    setUploadedLogo(null);
+
+    // Show generating state on the image
+    setIsModifyingImage(true);
+    setGenerationProgress(prev => ({ ...prev, [targetPlatform]: 'generating' }));
+
+    try {
+      const result = await imagesApi.modify(
+        currentImageData.imageUrl,
+        currentImageData.enhancedPrompt || platformImagePrompts[targetPlatform] || "",
+        instructions,
+        targetPlatform,
+        logoData?.base64,
+        logoData?.mimeType
+      );
+
+      // Update the platform images with the new image
+      setPlatformImages(prev => ({
+        ...prev,
+        [targetPlatform]: {
+          ...prev[targetPlatform],
+          imageUrl: result.imageUrl,
+          enhancedPrompt: result.enhancedPrompt
+        }
+      }));
+
+      // Also update the prompt
+      setPlatformImagePrompts(prev => ({
+        ...prev,
+        [targetPlatform]: result.enhancedPrompt
+      }));
+
+      setGenerationProgress(prev => ({ ...prev, [targetPlatform]: 'success' }));
+      toast.success("Image modified successfully!");
+
+      // Save modified image to database for persistence
+      if (result.imageUrl?.startsWith('http')) {
+        savePlatformImageToDatabase(targetPlatform, result.imageUrl, result.enhancedPrompt);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to modify image";
+      setGenerationProgress(prev => ({ ...prev, [targetPlatform]: 'error' }));
+      toast.error(errorMessage);
+    } finally {
+      setIsModifyingImage(false);
+    }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Extract base64 data (remove data:image/...;base64, prefix)
+      const base64 = result.split(',')[1];
+      const mimeType = file.type || 'image/png';
+      setUploadedLogo({ base64, mimeType });
+      // Show the interactive logo editor
+      setShowLogoEditor(true);
+      setShowModifyImageDialog(false); // Close the modify dialog
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle logo editor apply - composite multiple logos at user-specified positions
+  const handleLogoApply = async (logos: LogoInstance[]) => {
+    if (!logos.length || !editingImage) {
+      toast.error("No logos to apply or image missing");
+      return;
+    }
+
+    const { url, platform, prompt } = editingImage;
+
+    setShowLogoEditor(false);
+    setIsModifyingImage(true);
+    setGenerationProgress(prev => ({ ...prev, [platform]: 'generating' }));
+
+    try {
+      // Send all logos to the API
+      const result = await imagesApi.modify(
+        url,
+        prompt || "",
+        "add logo(s)", // Simple instruction
+        platform,
+        undefined, // No single logo
+        undefined, // No single mimeType
+        undefined, // No single logoPosition
+        logos // Multiple logos array
+      );
+
+      // Update the platform images with the new image
+      setPlatformImages(prev => ({
+        ...prev,
+        [platform]: {
+          ...prev[platform],
+          imageUrl: result.imageUrl,
+          enhancedPrompt: result.enhancedPrompt
+        }
+      }));
+
+      // Save to database for persistence
+      if (result.imageUrl?.startsWith('http')) {
+        savePlatformImageToDatabase(platform, result.imageUrl, result.enhancedPrompt);
+      }
+
+      setGenerationProgress(prev => ({ ...prev, [platform]: 'success' }));
+      toast.success(`${logos.length} logo${logos.length > 1 ? 's' : ''} added successfully!`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to add logos";
+      setGenerationProgress(prev => ({ ...prev, [platform]: 'error' }));
+      toast.error(errorMessage);
+    } finally {
+      setIsModifyingImage(false);
+      setUploadedLogo(null);
+      setEditingImage(null);
+    }
   };
 
   const handleLikeCaption = async (platformId: string, caption: string) => {
@@ -777,6 +1102,23 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
     <AnimatePresence>
       {isOpen && story && (
         <>
+          {/* Interactive Logo Editor */}
+          {showLogoEditor && uploadedLogo && editingImage && (
+            <LogoEditor
+              key={`${editingImage.platform}-${editingImage.url}`}
+              imageUrl={editingImage.url}
+              logoBase64={uploadedLogo.base64}
+              logoMimeType={uploadedLogo.mimeType}
+              platform={editingImage.platform}
+              onApply={handleLogoApply}
+              onCancel={() => {
+                setShowLogoEditor(false);
+                setUploadedLogo(null);
+                setEditingImage(null);
+              }}
+            />
+          )}
+
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -786,13 +1128,13 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
             className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
           />
 
-          {/* Drawer */}
+          {/* Right-side Drawer */}
           <motion.div
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 bottom-0 z-50 w-full md:w-[40vw] md:min-w-[500px] bg-background/95 backdrop-blur-md border-l border-border rounded-l-2xl overflow-hidden shadow-2xl"
+            className="fixed right-0 top-0 bottom-0 z-50 w-full sm:w-[75vw] md:w-[60vw] lg:w-[50vw] xl:w-[45vw] max-w-[700px] bg-background/95 backdrop-blur-md border-l border-border rounded-l-2xl overflow-hidden shadow-2xl"
           >
             <div className="h-full flex flex-col">
               {/* Header */}
@@ -841,25 +1183,35 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
 
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         // Force regenerate content
                         setGeneratedContent({});
                         setLastLoadedVariationId(null);
                         if (viewMode === 'image') {
-                          // Regenerate image prompts
-                          const storyTitle = story?.title || "professional content";
-                          const platformStyles: Record<string, string> = {
-                            linkedin: "Professional, clean, corporate style with business elements",
-                            twitter: "Bold, eye-catching, high contrast with quick visual impact",
-                            instagram: "Vibrant, visually stunning, aesthetic with rich colors",
-                            facebook: "Engaging, shareable, warm and community-focused",
-                          };
-                          const prompts: Record<string, string> = {};
-                          imagePlatforms.forEach(platform => {
-                            prompts[platform] = `${platformStyles[platform]}. Create an image for: ${storyTitle}`;
-                          });
-                          setPlatformImagePrompts(prompts);
+                          // Regenerate image prompts via API
+                          setIsGeneratingPrompts(true);
                           toast.info("Regenerating image prompts...");
+
+                          const storyContent = story?.content || story?.title || "professional marketing content";
+                          const generatedCaption = generatedContent[selectedImagePlatform] || storyContent;
+
+                          try {
+                            // Generate prompt for currently selected platform using AI
+                            const promptResult = await imagesApi.generatePrompt(generatedCaption, selectedImagePlatform);
+
+                            if (promptResult.prompt) {
+                              setPlatformImagePrompts(prev => ({
+                                ...prev,
+                                [selectedImagePlatform]: promptResult.prompt
+                              }));
+                              toast.success(`Image prompt regenerated for ${selectedImagePlatform}!`);
+                            }
+                          } catch (error) {
+                            console.error("Failed to regenerate image prompt:", error);
+                            toast.error("Failed to regenerate image prompt");
+                          } finally {
+                            setIsGeneratingPrompts(false);
+                          }
                         } else {
                           // Clear image state when regenerating text
                           setPlatformImagePrompts({});
@@ -868,12 +1220,12 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                           toast.info("Regenerating platform content...");
                         }
                       }}
-                      disabled={isLoading}
+                      disabled={isLoading || isGeneratingPrompts}
                       className="w-10 h-10 rounded-lg bg-secondary hover:bg-secondary/80 flex items-center justify-center transition-colors disabled:opacity-50"
                       title="Regenerate Content"
                       aria-label="Regenerate Content"
                     >
-                      <RefreshCw className={cn("w-5 h-5", isLoading && "animate-spin")} />
+                      <RefreshCw className={cn("w-5 h-5", (isLoading || isGeneratingPrompts) && "animate-spin")} />
                     </button>
                     <button
                       onClick={onClose}
@@ -960,7 +1312,15 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                       <p>Generating content for {platforms.find(p => p.id === activePlatform)?.name}...</p>
                     </div>
                   ) : (
-                    <div className="space-y-6">
+                    <div className="space-y-6 relative">
+                      {isModifying && (
+                        <div className="absolute inset-0 z-50 bg-background/50 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
+                          <div className="bg-primary text-primary-foreground shadow-lg px-4 py-2 rounded-full flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span className="text-sm font-medium">Modifying...</span>
+                          </div>
+                        </div>
+                      )}
                       {/* Generated Text Display */}
                       <div className="prose prose-sm dark:prose-invert max-w-none">
                         {activePlatform === 'twitter' ? (
@@ -1235,6 +1595,18 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                           )}
                         </Button>
 
+                        {/* Modify Button */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowModifyDialog(true)}
+                          disabled={!currentContent || isModifying}
+                          className="h-10 px-4 font-semibold text-sm border-border bg-secondary/50 hover:bg-primary hover:text-white hover:border-primary text-foreground transition-colors"
+                        >
+                          <Pencil className="w-4 h-4 mr-2" />
+                          Modify
+                        </Button>
+
                         {/* Right: Stats & Feedback */}
                         <div className="flex items-center gap-3">
                           {/* Character Count */}
@@ -1428,12 +1800,42 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                                   </div>
 
                                   {/* Image */}
-                                  <div style={{ aspectRatio: `${aspectRatio}` }}>
-                                    <img
-                                      src={platformImages[currentPlatform].imageUrl}
-                                      alt={`${currentPlatform} image`}
-                                      className="w-full h-full object-cover"
-                                    />
+                                  {/* Image with Error Handling */}
+                                  <div style={{ aspectRatio: `${aspectRatio}` }} className="bg-gray-100 dark:bg-gray-800 flex items-center justify-center relative bg-pattern">
+                                    {/* Fallback Error State */}
+                                    {imageLoadErrors[currentPlatform] ? (
+                                      <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground p-4 text-center animate-in fade-in">
+                                        <AlertCircle className="w-8 h-8 mb-2 text-destructive" />
+                                        <p className="text-sm font-medium">Failed to load image</p>
+                                        <button
+                                          onClick={() => setImageLoadErrors(prev => ({ ...prev, [currentPlatform]: false }))}
+                                          className="text-xs text-primary hover:underline mt-2"
+                                        >
+                                          Retry
+                                        </button>
+                                        <p className="text-[10px] opacity-50 mt-2 font-mono break-all max-w-[80%]">
+                                          {platformImages[currentPlatform].imageUrl?.slice(0, 60)}...
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      /* Actual Image */
+                                      platformImages[currentPlatform].imageUrl ? (
+                                        <img
+                                          src={platformImages[currentPlatform].imageUrl}
+                                          alt={`${currentPlatform} generated content`}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            console.error(`Image failed to load: ${platformImages[currentPlatform].imageUrl}`);
+                                            setImageLoadErrors(prev => ({ ...prev, [currentPlatform]: true }));
+                                          }}
+                                        />
+                                      ) : (
+                                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                          <Loader2 className="w-8 h-8 animate-spin" />
+                                          <span className="text-xs">Loading image...</span>
+                                        </div>
+                                      )
+                                    )}
                                   </div>
 
                                   {/* Hover Overlay */}
@@ -1479,81 +1881,115 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                             );
                           })()}
 
-                          {/* Generate Button */}
-                          <Button
-                            onClick={async () => {
-                              const prompt = platformImagePrompts[currentPlatform];
-                              if (!prompt?.trim()) {
-                                toast.error("Please enter an image prompt first");
-                                return;
-                              }
-
-                              setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'generating' }));
-                              try {
-                                const result = await imagesApi.generate(prompt, undefined, undefined, currentPlatform);
-                                if (result.imageUrl) {
-                                  // Construct full URL if relative
-                                  const fullUrl = result.imageUrl.startsWith('http')
-                                    ? result.imageUrl
-                                    : result.imageUrl;
-
-                                  // Save to IndexedDB for persistence
-                                  try {
-                                    const imageId = `${storyId || 'temp'}-${currentPlatform}-${Date.now()}`;
-                                    const blob = await urlToBlob(fullUrl);
-                                    await saveImage(imageId, blob, currentPlatform, storyId);
-                                    const localUrl = await getImageUrl(imageId);
-
-                                    setPlatformImages(prev => ({
-                                      ...prev,
-                                      [currentPlatform]: { enhancedPrompt: result.enhancedPrompt, imageUrl: localUrl || fullUrl, imageId }
-                                    }));
-                                  } catch (storageError) {
-                                    console.warn('[Storage] Failed to cache image:', storageError);
-                                    // Fallback: use server URL
-                                    setPlatformImages(prev => ({
-                                      ...prev,
-                                      [currentPlatform]: { enhancedPrompt: result.enhancedPrompt, imageUrl: fullUrl }
-                                    }));
-                                  }
-
-                                  const updatedPrompt = result.enhancedPrompt?.trim() ? result.enhancedPrompt : prompt;
-                                  setPlatformImagePrompts(prev => ({
-                                    ...prev,
-                                    [currentPlatform]: updatedPrompt
-                                  }));
-                                  setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'success' }));
-                                  toast.success(`${currentPlatform} image generated!`);
-                                } else {
-                                  setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'error' }));
-                                  toast.error("Failed to generate image");
+                          {/* Action Buttons - Side by Side when image exists */}
+                          <div className={cn("flex gap-3", hasImage ? "flex-row" : "")}>
+                            {/* Generate/Regenerate Button */}
+                            <Button
+                              onClick={async () => {
+                                const prompt = platformImagePrompts[currentPlatform];
+                                if (!prompt?.trim()) {
+                                  toast.error("Please enter an image prompt first");
+                                  return;
                                 }
-                              } catch (error) {
-                                console.error("Image generation failed:", error);
-                                setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'error' }));
-                                toast.error("Image generation failed");
-                              }
-                            }}
-                            disabled={!platformImagePrompts[currentPlatform]?.trim() || imageStatus === 'generating'}
-                            className="w-full gradient-primary text-white h-12"
-                          >
-                            {imageStatus === 'generating' ? (
-                              <>
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                Generating {currentPlatform} Image...
-                              </>
-                            ) : hasImage ? (
-                              <>
-                                <RefreshCw className="w-4 h-4 mr-2" />
-                                Regenerate {currentPlatform} Image
-                              </>
-                            ) : (
-                              <>
-                                <ImageIcon className="w-4 h-4 mr-2" />
-                                Generate {currentPlatform} Image
-                              </>
+
+                                setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'generating' }));
+                                try {
+                                  const result = await imagesApi.generate(prompt, undefined, undefined, currentPlatform);
+                                  if (result.imageUrl) {
+                                    const fullUrl = result.imageUrl.startsWith('http')
+                                      ? result.imageUrl
+                                      : result.imageUrl;
+
+                                    try {
+                                      const imageId = `${storyId || 'temp'}-${currentPlatform}-${Date.now()}`;
+                                      const blob = await urlToBlob(fullUrl);
+                                      await saveImage(imageId, blob, currentPlatform, storyId);
+                                      const localUrl = await getImageUrl(imageId);
+
+                                      const shouldUseRemoteUrl = fullUrl.startsWith('http');
+                                      setPlatformImages(prev => ({
+                                        ...prev,
+                                        [currentPlatform]: {
+                                          enhancedPrompt: result.enhancedPrompt,
+                                          imageUrl: shouldUseRemoteUrl ? fullUrl : (localUrl || fullUrl),
+                                          imageId
+                                        }
+                                      }));
+                                    } catch (storageError) {
+                                      console.warn('[Storage] Failed to cache image:', storageError);
+                                      setPlatformImages(prev => ({
+                                        ...prev,
+                                        [currentPlatform]: { enhancedPrompt: result.enhancedPrompt, imageUrl: fullUrl }
+                                      }));
+                                    }
+
+                                    const updatedPrompt = result.enhancedPrompt?.trim() ? result.enhancedPrompt : prompt;
+                                    setPlatformImagePrompts(prev => ({
+                                      ...prev,
+                                      [currentPlatform]: updatedPrompt
+                                    }));
+                                    setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'success' }));
+                                    toast.success(`${currentPlatform} image generated!`);
+
+                                    // Save to database for persistence across sessions
+                                    const finalImageUrl = fullUrl.startsWith('http') ? fullUrl : (result.imageUrl || '');
+                                    if (finalImageUrl) {
+                                      savePlatformImageToDatabase(currentPlatform, finalImageUrl, updatedPrompt);
+                                    }
+                                  } else {
+                                    setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'error' }));
+                                    toast.error("Failed to generate image");
+                                  }
+                                } catch (error) {
+                                  console.error("Image generation failed:", error);
+                                  setGenerationProgress(prev => ({ ...prev, [currentPlatform]: 'error' }));
+                                  toast.error("Image generation failed");
+                                }
+                              }}
+                              disabled={!platformImagePrompts[currentPlatform]?.trim() || imageStatus === 'generating'}
+                              className={cn(
+                                "gradient-primary text-white h-12",
+                                hasImage ? "flex-1" : "w-full"
+                              )}
+                            >
+                              {imageStatus === 'generating' ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                  Generating...
+                                </>
+                              ) : hasImage ? (
+                                <>
+                                  <RefreshCw className="w-4 h-4 mr-2" />
+                                  Regenerate
+                                </>
+                              ) : (
+                                <>
+                                  <ImageIcon className="w-4 h-4 mr-2" />
+                                  Generate {currentPlatform} Image
+                                </>
+                              )}
+                            </Button>
+
+                            {/* Modify Image Button - Only visible when image exists */}
+                            {hasImage && (
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setEditingImage({
+                                    url: platformImages[currentPlatform]!.imageUrl!,
+                                    platform: currentPlatform,
+                                    prompt: platformImagePrompts[currentPlatform] || platformImages[currentPlatform]!.enhancedPrompt
+                                  });
+                                  setShowModifyImageDialog(true);
+                                }}
+                                disabled={imageStatus === 'generating' || isModifyingImage}
+                                className="flex-1 h-12 border-border bg-secondary/50 hover:bg-primary hover:text-white hover:border-primary transition-colors"
+                              >
+                                <Pencil className="w-4 h-4 mr-2" />
+                                Modify
+                              </Button>
                             )}
-                          </Button>
+                          </div>
 
                           {/* View Text Link */}
                           <button
@@ -1672,8 +2108,251 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
               </div>
             </motion.div>
           )}
+
+          {/* Modify Caption Dialog */}
+          {showModifyDialog && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              onClick={() => setShowModifyDialog(false)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md bg-background border border-border rounded-2xl shadow-2xl overflow-hidden"
+              >
+                {/* Dialog Header */}
+                <div className="p-4 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Pencil className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">Modify Caption</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Editing {platform?.name || activePlatform} content
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowModifyDialog(false)}
+                    className="w-8 h-8 rounded-lg hover:bg-secondary flex items-center justify-center"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Dialog Content */}
+                <div className="p-4 space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                      What changes would you like?
+                    </label>
+                    <Textarea
+                      placeholder="e.g., Make it shorter, add more emojis, make it more formal, add a call to action..."
+                      value={modifyInstructions}
+                      onChange={(e) => setModifyInstructions(e.target.value)}
+                      className="min-h-[100px] resize-none"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="text-xs text-muted-foreground bg-secondary/50 rounded-lg p-3">
+                    <strong>Tip:</strong> Be specific about what you want to change. For example:
+                    <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                      <li>"Make it 50% shorter"</li>
+                      <li>"Add 3-4 relevant emojis"</li>
+                      <li>"Make the tone more casual and friendly"</li>
+                      <li>"Add a question at the end"</li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Dialog Footer */}
+                <div className="p-4 border-t border-border flex items-center justify-end gap-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setShowModifyDialog(false);
+                      setModifyInstructions("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleModify}
+                    disabled={!modifyInstructions.trim() || isModifying}
+                    className="gradient-primary text-white"
+                  >
+                    {isModifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Modifying...
+                      </>
+                    ) : (
+                      <>
+                        <Pencil className="w-4 h-4 mr-2" />
+                        Apply Changes
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Modify Image Dialog */}
+          {showModifyImageDialog && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              onClick={() => setShowModifyImageDialog(false)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md bg-background border border-border rounded-2xl shadow-2xl overflow-hidden"
+              >
+                {/* Dialog Header */}
+                <div className="p-4 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <ImageIcon className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">Modify Image</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Editing {platform?.name || activePlatform} image
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowModifyImageDialog(false)}
+                    className="w-8 h-8 rounded-lg hover:bg-secondary flex items-center justify-center"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Dialog Content */}
+                <div className="p-4 space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                      What changes would you like?
+                    </label>
+                    <Textarea
+                      placeholder="e.g., Add my logo in the corner, change background to blue, make it more vibrant..."
+                      value={modifyImageInstructions}
+                      onChange={(e) => setModifyImageInstructions(e.target.value)}
+                      className="min-h-[100px] resize-none"
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Logo Upload */}
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                      Upload Logo/Element (Optional)
+                    </label>
+                    <div className="border-2 border-dashed border-border rounded-lg p-4 text-center">
+                      {uploadedLogo ? (
+                        <div className="flex items-center justify-between bg-green-500/10 border border-green-500/20 rounded-lg p-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded bg-background flex items-center justify-center overflow-hidden border">
+                              <img
+                                src={`data:${uploadedLogo.mimeType};base64,${uploadedLogo.base64}`}
+                                alt="Uploaded logo"
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-green-600 dark:text-green-400">Logo uploaded</span>
+                              <span className="text-[10px] text-muted-foreground">Exact Overlay (Bottom-Right)</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setUploadedLogo(null)}
+                            className="text-sm text-destructive hover:underline px-2"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="cursor-pointer">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleLogoUpload}
+                            className="hidden"
+                          />
+                          <div className="flex flex-col items-center gap-2 py-2">
+                            <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
+                              <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                            </div>
+                            <span className="text-sm text-muted-foreground">
+                              Click to upload logo or image element
+                            </span>
+                          </div>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground bg-secondary/50 rounded-lg p-3">
+                    <strong>Examples:</strong>
+                    <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                      <li>"Add my logo in the bottom-right corner"</li>
+                      <li>"Change the background to a gradient"</li>
+                      <li>"Make the colors more vibrant"</li>
+                      <li>"Add text overlay saying 'SALE'"</li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Dialog Footer */}
+                <div className="p-4 border-t border-border flex items-center justify-end gap-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setShowModifyImageDialog(false);
+                      setModifyImageInstructions("");
+                      setUploadedLogo(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleModifyImage}
+                    disabled={!modifyImageInstructions.trim() || isModifyingImage}
+                    className="gradient-primary text-white"
+                  >
+                    {isModifyingImage ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Modifying Image...
+                      </>
+                    ) : (
+                      <>
+                        <ImageIcon className="w-4 h-4 mr-2" />
+                        Apply Changes
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
         </>
-      )}
-    </AnimatePresence>
+      )
+      }
+    </AnimatePresence >
   );
 };

@@ -168,7 +168,7 @@ export const filesApi = {
         headers['Authorization'] = `Bearer ${token}`;
       }
       // Don't set Content-Type - browser will set it automatically with boundary for FormData
-      
+
       // Update: Point to the correct API endpoint
       console.log('[Files API] Sending request to:', `${API_BASE}/files`);
       console.log('[Files API] File size:', file.size, 'bytes');
@@ -373,6 +373,22 @@ export const contentApi = {
       throw new Error(error.error || 'Failed to dislike caption');
     }
   },
+
+  modify: async (caption: string, platform: string, instructions: string): Promise<string> => {
+    const response = await fetch(`${API_BASE}/content`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+      body: JSON.stringify({ action: 'modify', caption, platform, instructions }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to modify caption' }));
+      throw new Error(error.error || 'Failed to modify caption');
+    }
+
+    const data = await response.json();
+    return data.modifiedCaption;
+  },
 };
 
 // Images API
@@ -447,6 +463,40 @@ export const imagesApi = {
       const error = await response.json().catch(() => ({ error: 'Failed to dislike image' }));
       throw new Error(error.error || 'Failed to dislike image');
     }
+  },
+
+  modify: async (
+    imageUrl: string,
+    originalPrompt: string,
+    instructions: string,
+    platform?: string,
+    logoBase64?: string,
+    logoMimeType?: string,
+    logoPosition?: { x: number; y: number; scale: number },
+    logos?: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number }>
+  ): Promise<{ imageUrl: string; enhancedPrompt: string }> => {
+    const response = await fetch(`${API_BASE}/images`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+      body: JSON.stringify({
+        action: 'modify',
+        imageUrl,
+        originalPrompt,
+        instructions,
+        platform,
+        logoBase64,
+        logoMimeType,
+        logoPosition,
+        logos
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to modify image' }));
+      throw new Error(error.error || 'Failed to modify image');
+    }
+
+    return response.json();
   },
 };
 

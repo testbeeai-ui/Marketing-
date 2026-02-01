@@ -38,6 +38,38 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Modify image
+        if (action === 'modify') {
+            const { imageUrl, originalPrompt, instructions, logoBase64, logoMimeType, logoPosition, logos } = body;
+
+            if (!imageUrl || !originalPrompt || !instructions) {
+                return NextResponse.json({
+                    error: 'imageUrl, originalPrompt, and instructions are required'
+                }, { status: 400 });
+            }
+
+            try {
+                const result = await imageGenerator.modifyImage(
+                    imageUrl,
+                    originalPrompt,
+                    instructions,
+                    platform,
+                    logoBase64,
+                    logoMimeType,
+                    userIdOrUndefined,
+                    logoPosition,
+                    logos
+                );
+                return NextResponse.json({
+                    imageUrl: result.imageUrl,
+                    enhancedPrompt: result.enhancedPrompt
+                });
+            } catch (error: any) {
+                console.error('Error modifying image:', error);
+                return NextResponse.json({ error: error.message || 'Failed to modify image' }, { status: 500 });
+            }
+        }
+
         // Like image
         if (action === 'like') {
             if (!imagePrompt || !prompt) {
@@ -48,7 +80,7 @@ export async function POST(request: NextRequest) {
             }
 
             const styleAnalysis = await styleExtractor.extractImageStyle(imagePrompt);
-            
+
             await userMemoryService.addMemory(userId, MEMORY_TYPES.LIKED_IMAGE_STYLE, imagePrompt, {
                 style_analysis: styleAnalysis,
                 prompt: prompt,
@@ -68,7 +100,7 @@ export async function POST(request: NextRequest) {
             }
 
             const dislikeAnalysis = await styleExtractor.analyzeDislikedImage(imagePrompt);
-            
+
             await userMemoryService.addMemory(userId, MEMORY_TYPES.DISLIKED_IMAGE_STYLE, imagePrompt, {
                 avoidance_analysis: dislikeAnalysis,
                 why_disliked: dislikeAnalysis.why_disliked,
