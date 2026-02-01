@@ -190,29 +190,40 @@ export const filesApi = {
 
       if (!response.ok) {
         let errorMessage = `Upload failed: ${response.status} ${response.statusText}`;
+        let errorData: any = {};
 
         try {
-          const errorData = await response.json();
-          console.error('[Files API] Upload failed with error data:', errorData);
-          errorMessage = errorData.error || errorData.message || errorMessage;
+          const text = await response.text();
+          console.log('[Files API] Raw error response:', text);
 
-          // Provide specific error messages for common cases
-          if (response.status === 401) {
-            errorMessage = 'Authentication failed. Please log in again.';
-          } else if (response.status === 404) {
-            errorMessage = 'Block not found. Please refresh the page and try again.';
-          } else if (response.status === 400) {
-            errorMessage = errorData.error || 'Invalid request. Please check the file and try again.';
-          } else if (response.status === 500) {
-            errorMessage = errorData.error || 'Server error. Please try again or contact support.';
-          }
-        } catch (parseError) {
-          // If we can't parse JSON, use the status text
-          console.error('[Files API] Could not parse error response:', parseError);
-          const text = await response.text().catch(() => '');
           if (text) {
-            console.error('[Files API] Error response text:', text);
+            try {
+              errorData = JSON.parse(text);
+              console.error('[Files API] Upload failed with error data:', errorData);
+              errorMessage = errorData.error || errorData.message || errorMessage;
+              if (errorData.details) {
+                errorMessage += ` (${errorData.details})`;
+              }
+            } catch (e) {
+              console.error('[Files API] Could not parse error JSON:', e);
+              // If it's not JSON, maybe it's a plain text error from the server
+              errorMessage = text.substring(0, 200) + (text.length > 200 ? '...' : '');
+            }
           }
+        } catch (readError) {
+          console.error('[Files API] Could not read error response text:', readError);
+        }
+
+        // Provide specific error messages for common cases override
+        if (response.status === 401) {
+          errorMessage = 'Authentication failed. Please log in again.';
+        } else if (response.status === 404) {
+          errorMessage = 'Block not found. Please refresh the page and try again.';
+        } else if (response.status === 400 && errorData && errorData.error) {
+          // Keep the specific 400 error
+        } else if (response.status === 500 && !errorMessage.includes('Failed to')) {
+          // Only use generic if we didn't get a specific one
+          errorMessage = 'Server error. Please try again or contact support.';
         }
 
         throw new Error(errorMessage);

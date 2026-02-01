@@ -2,6 +2,9 @@ import sys
 import json
 import os
 import traceback
+
+# Force UTF-8 encoding for stdout (fixes Windows charmap errors)
+sys.stdout.reconfigure(encoding='utf-8')
 from docling.document_converter import DocumentConverter
 
 def process_file(file_path):
