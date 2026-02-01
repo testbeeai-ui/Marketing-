@@ -484,7 +484,7 @@ export const imagesApi = {
     logoBase64?: string,
     logoMimeType?: string,
     logoPosition?: { x: number; y: number; scale: number },
-    logos?: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number }>
+    logos?: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number; removeBackground?: boolean }>
   ): Promise<{ imageUrl: string; enhancedPrompt: string }> => {
     const response = await fetch(`${API_BASE}/images`, {
       method: 'POST',

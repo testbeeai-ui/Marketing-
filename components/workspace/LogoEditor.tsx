@@ -13,7 +13,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Check, RotateCcw, ZoomIn, ZoomOut, Move, Trash2, Plus, Undo2, Redo2, AlignCenterHorizontal, AlignCenterVertical, Keyboard } from 'lucide-react';
+import { X, Check, RotateCcw, ZoomIn, ZoomOut, Move, Trash2, Plus, Undo2, Redo2, AlignCenterHorizontal, AlignCenterVertical, Keyboard, Eraser } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -34,6 +34,8 @@ export interface LogoInstance {
     x: number; // percentage from left (0-100)
     y: number; // percentage from top (0-100)
     scale: number; // scale factor
+    removeBackground?: boolean; // toggle for smart removal
+    previewBase64?: string; // Client-side processed image for preview
 }
 
 export interface LogoPosition {
@@ -61,7 +63,9 @@ export function LogoEditor({
         mimeType: logoMimeType,
         x: 85,
         y: 85,
-        scale: 0.15
+        scale: 0.15,
+        removeBackground: false,
+        previewBase64: logoBase64
     };
 
     // State
@@ -323,6 +327,124 @@ export function LogoEditor({
         toast.info("Logo removed");
     };
 
+    // Toggle Background Removal
+    const handleToggleBackground = () => {
+        if (!selectedLogoId) return;
+        addToHistory();
+        setLogos(prev => prev.map(l =>
+            l.id === selectedLogoId ? { ...l, removeBackground: !l.removeBackground } : l
+        ));
+        toast.info(selectedLogo?.removeBackground ? "Smart background removal disabled" : "Smart background removal enabled");
+    };
+
+    /**
+     * Smart Background Removal Logic (Client-Side)
+     * Matches the backend logic: samples corners and removes similar pixels
+     */
+    const processLogoTransparency = useCallback(async (logo: LogoInstance) => {
+        if (!logo.removeBackground) {
+            // Revert to original if disabled
+            if (logo.previewBase64 !== logo.base64) {
+                setLogos(prev => prev.map(l => l.id === logo.id ? { ...l, previewBase64: l.base64 } : l));
+            }
+            return;
+        }
+
+        // Avoid re-processing if we already have a processed version (and it's not the same as original)
+        // Note: This simple check assumes if preview != base64, it's already processed. 
+        // We might want more robust dirty checking but this is fine for toggle.
+        if (logo.previewBase64 && logo.previewBase64 !== logo.base64) return;
+
+        try {
+            const img = new Image();
+            img.src = `data:${logo.mimeType};base64,${logo.base64}`;
+            await new Promise((resolve) => { img.onload = resolve; });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const { width, height } = canvas;
+
+            // Sample corners for background color
+            const sampleSize = Math.max(3, Math.min(width, height) * 0.05);
+            const corners = [
+                { x: 0, y: 0 },
+                { x: width - sampleSize, y: 0 },
+                { x: 0, y: height - sampleSize },
+                { x: width - sampleSize, y: height - sampleSize }
+            ];
+
+            // Average color from corners
+            let r = 0, g = 0, b = 0, count = 0;
+            for (const corner of corners) {
+                for (let dy = 0; dy < sampleSize; dy++) {
+                    for (let dx = 0; dx < sampleSize; dx++) {
+                        const px = (Math.floor(corner.y + dy) * width + Math.floor(corner.x + dx)) * 4;
+                        if (px < data.length) {
+                            r += data[px];
+                            g += data[px + 1];
+                            b += data[px + 2];
+                            count++;
+                        }
+                    }
+                }
+            }
+            const bgR = r / count;
+            const bgG = g / count;
+            const bgB = b / count;
+
+            const isWhite = bgR > 240 && bgG > 240 && bgB > 240;
+            const threshold = isWhite ? 60 : 50; // Higher tolerance for white
+
+            // Apply transparency
+            for (let i = 0; i < data.length; i += 4) {
+                const pr = data[i];
+                const pg = data[i + 1];
+                const pb = data[i + 2];
+
+                // Euclidean distance check
+                const dist = Math.sqrt(
+                    Math.pow(pr - bgR, 2) +
+                    Math.pow(pg - bgG, 2) +
+                    Math.pow(pb - bgB, 2)
+                );
+
+                if (dist < threshold) {
+                    data[i + 3] = 0; // Transparent
+                } else if (dist < threshold + 20) {
+                    // Soft edge (feather)
+                    const alpha = ((dist - threshold) / 20) * 255;
+                    data[i + 3] = Math.min(data[i + 3], alpha);
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            const processedBase64 = canvas.toDataURL(logo.mimeType).split(',')[1];
+
+            setLogos(prev => prev.map(l => l.id === logo.id ? { ...l, previewBase64: processedBase64 } : l));
+        } catch (e) {
+            console.error("Client-side background removal failed", e);
+        }
+    }, []);
+
+    // Effect to trigger processing when flags change
+    useEffect(() => {
+        logos.forEach(logo => {
+            if (logo.removeBackground && logo.previewBase64 === logo.base64) {
+                processLogoTransparency(logo);
+            } else if (!logo.removeBackground && logo.previewBase64 !== logo.base64) {
+                // Revert
+                setLogos(prev => prev.map(l => l.id === logo.id ? { ...l, previewBase64: l.base64 } : l));
+            }
+        });
+    }, [logos, processLogoTransparency]);
+
     // Add Logo
     const handleAddLogo = (base64: string, mimeType: string) => {
         addToHistory();
@@ -332,7 +454,9 @@ export function LogoEditor({
             mimeType,
             x: 50,
             y: 50,
-            scale: 0.15
+            scale: 0.15,
+            removeBackground: false,
+            previewBase64: base64
         };
         setLogos(prev => [...prev, newLogo]);
         setSelectedLogoId(newLogo.id);
@@ -482,7 +606,7 @@ export function LogoEditor({
                                         !isSelected && "hover:ring-1 hover:ring-primary/50"
                                     )}>
                                         <img
-                                            src={`data:${logo.mimeType};base64,${logo.base64}`}
+                                            src={`data:${logo.mimeType};base64,${logo.previewBase64 || logo.base64}`}
                                             alt="logo"
                                             className="w-full h-auto pointer-events-none block"
                                             draggable={false}
@@ -596,6 +720,19 @@ export function LogoEditor({
                                         <AlignCenterVertical className="w-4 h-4" />
                                     </Button>
                                 </div>
+
+                                <div className="h-8 w-px bg-border" />
+
+                                {/* Background Toggle */}
+                                <Button
+                                    variant={selectedLogo.removeBackground ? "secondary" : "ghost"}
+                                    size="icon"
+                                    className="h-9 w-9"
+                                    onClick={handleToggleBackground}
+                                    title="Remove Background (Smart)"
+                                >
+                                    <Eraser className="w-4 h-4" />
+                                </Button>
 
                                 <div className="h-8 w-px bg-border" />
 

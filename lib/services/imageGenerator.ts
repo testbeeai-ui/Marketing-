@@ -299,8 +299,8 @@ YOUR ENHANCED PROMPT (Only output the prompt, nothing else):`;
     logoBase64?: string,
     logoMimeType?: string,
     userId?: string,
-    logoPosition?: { x: number; y: number; scale: number },
-    logos?: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number }>
+    logoPosition?: { x: number; y: number; scale: number; removeBackground?: boolean },
+    logos?: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number; removeBackground?: boolean }>
   ): Promise<{ enhancedPrompt: string; imageUrl?: string; platform?: string }> {
     console.log('[ImageGenerator] Starting image modification...');
     console.log('[ImageGenerator] Current image URL:', currentImageUrl?.substring(0, 100));
@@ -518,7 +518,7 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
    */
   private async addMultipleLogosToExistingImage(
     imageUrl: string,
-    logos: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number }>,
+    logos: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number; removeBackground?: boolean }>,
     originalPrompt: string,
     platform?: string,
     userId?: string
@@ -553,7 +553,8 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
         currentBuffer = await this.compositeLogo(currentBuffer, logo.base64, {
           x: logo.x,
           y: logo.y,
-          scale: logo.scale
+          scale: logo.scale,
+          removeBackground: logo.removeBackground
         });
       }
 
@@ -704,7 +705,7 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
   private async compositeLogo(
     backgroundBuffer: Buffer,
     logoBase64: string,
-    logoPosition?: { x: number; y: number; scale: number }
+    logoPosition?: { x: number; y: number; scale: number; removeBackground?: boolean }
   ): Promise<Buffer> {
     const logoBuffer = Buffer.from(logoBase64, 'base64');
 
@@ -717,12 +718,23 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
     const scale = logoPosition?.scale ?? 0.15;
     const targetLogoWidth = Math.round(bgWidth * scale);
 
-    // Step 1: Remove background from logo
-    console.log('[ImageGenerator] Removing logo background...');
-    const logoWithTransparency = await this.removeLogoBackground(logoBuffer);
+    // Step 1: Handle Background (Smart Removal vs Original)
+    let logoToComposite = logoBuffer;
+
+    // If user explicitly requests background removal
+    if (logoPosition?.removeBackground) {
+      console.log('[ImageGenerator] Performing smart background removal...');
+      try {
+        logoToComposite = await this.removeLogoBackground(logoBuffer);
+        // Ensure PNG format for transparency
+        logoToComposite = await sharp(logoToComposite).png().toBuffer();
+      } catch (e) {
+        console.error('[ImageGenerator] Smart background removal failed, falling back to original', e);
+      }
+    }
 
     // Step 2: Resize logo based on scale
-    const resizedLogo = await sharp(logoWithTransparency)
+    const resizedLogo = await sharp(logoToComposite)
       .resize({ width: targetLogoWidth })
       .png() // Ensure PNG for transparency
       .toBuffer();
@@ -743,8 +755,6 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
       // Clamp to image bounds
       left = Math.max(0, Math.min(bgWidth - logoWidth, left));
       top = Math.max(0, Math.min(bgHeight - logoHeight, top));
-
-      console.log('[ImageGenerator] Using custom position:', { x: logoPosition.x, y: logoPosition.y, scale });
     } else {
       // Default: Bottom-Right with padding
       const padding = Math.round(bgWidth * 0.03); // 3% padding
@@ -754,13 +764,13 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
 
     console.log('[ImageGenerator] Compositing logo at position:', { left, top, width: logoWidth, height: logoHeight });
 
-    // Composite with blend mode
+    // Composite with standard overlay (transparency is now baked into the image)
     return await sharp(backgroundBuffer)
       .composite([{
         input: resizedLogo,
         top: top,
         left: left,
-        blend: 'over' // Standard alpha compositing
+        blend: 'over'
       }])
       .toBuffer();
   }
@@ -836,7 +846,10 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
 
       // Create new buffer with transparency where background color matches
       const newData = Buffer.alloc(data.length);
-      const tolerance = 30; // Color matching tolerance
+
+      // Determine if background is "White" (high luminance) to be more aggressive
+      const isWhite = bgColor.r > 240 && bgColor.g > 240 && bgColor.b > 240;
+      const tolerance = isWhite ? 60 : 50; // Higher tolerance for white due to compression artifacts
 
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i];
@@ -844,19 +857,28 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
         const b = data[i + 2];
         const a = data[i + 3];
 
-        // Check if this pixel matches the background color
-        const rDiff = Math.abs(r - bgColor.r);
-        const gDiff = Math.abs(g - bgColor.g);
-        const bDiff = Math.abs(b - bgColor.b);
+        // Euclidean distance check
+        const dist = Math.sqrt(
+          Math.pow(r - bgColor.r, 2) +
+          Math.pow(g - bgColor.g, 2) +
+          Math.pow(b - bgColor.b, 2)
+        );
 
-        if (rDiff <= tolerance && gDiff <= tolerance && bDiff <= tolerance) {
-          // Make this pixel transparent
+        if (dist < tolerance) {
+          // Transparent
           newData[i] = r;
           newData[i + 1] = g;
           newData[i + 2] = b;
-          newData[i + 3] = 0; // Fully transparent
+          newData[i + 3] = 0;
+        } else if (dist < tolerance + 20) {
+          // Soft edge (feather)
+          const alphaFactor = ((dist - tolerance) / 20);
+          newData[i] = r;
+          newData[i + 1] = g;
+          newData[i + 2] = b;
+          newData[i + 3] = Math.round(Math.min(a, alphaFactor * 255));
         } else {
-          // Keep original pixel
+          // Keep original
           newData[i] = r;
           newData[i + 1] = g;
           newData[i + 2] = b;
@@ -864,24 +886,17 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
         }
       }
 
-      // Create new image with transparency
       return await sharp(newData, {
         raw: {
           width: info.width,
           height: info.height,
           channels: 4
         }
-      })
-        .png()
-        .toBuffer();
+      }).png().toBuffer();
 
     } catch (error) {
-      console.warn('[ImageGenerator] Background removal failed, using original logo:', error);
-      // If background removal fails, ensure the logo has alpha channel and return
-      return await sharp(logoBuffer)
-        .ensureAlpha()
-        .png()
-        .toBuffer();
+      console.error('[ImageGenerator] Error removing logo background:', error);
+      return logoBuffer; // Return original on error
     }
   }
 }
