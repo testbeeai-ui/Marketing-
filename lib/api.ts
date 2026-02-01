@@ -168,7 +168,7 @@ export const filesApi = {
         headers['Authorization'] = `Bearer ${token}`;
       }
       // Don't set Content-Type - browser will set it automatically with boundary for FormData
-      
+
       // Update: Point to the correct API endpoint
       console.log('[Files API] Sending request to:', `${API_BASE}/files`);
       console.log('[Files API] File size:', file.size, 'bytes');
@@ -190,29 +190,40 @@ export const filesApi = {
 
       if (!response.ok) {
         let errorMessage = `Upload failed: ${response.status} ${response.statusText}`;
+        let errorData: any = {};
 
         try {
-          const errorData = await response.json();
-          console.error('[Files API] Upload failed with error data:', errorData);
-          errorMessage = errorData.error || errorData.message || errorMessage;
+          const text = await response.text();
+          console.log('[Files API] Raw error response:', text);
 
-          // Provide specific error messages for common cases
-          if (response.status === 401) {
-            errorMessage = 'Authentication failed. Please log in again.';
-          } else if (response.status === 404) {
-            errorMessage = 'Block not found. Please refresh the page and try again.';
-          } else if (response.status === 400) {
-            errorMessage = errorData.error || 'Invalid request. Please check the file and try again.';
-          } else if (response.status === 500) {
-            errorMessage = errorData.error || 'Server error. Please try again or contact support.';
-          }
-        } catch (parseError) {
-          // If we can't parse JSON, use the status text
-          console.error('[Files API] Could not parse error response:', parseError);
-          const text = await response.text().catch(() => '');
           if (text) {
-            console.error('[Files API] Error response text:', text);
+            try {
+              errorData = JSON.parse(text);
+              console.error('[Files API] Upload failed with error data:', errorData);
+              errorMessage = errorData.error || errorData.message || errorMessage;
+              if (errorData.details) {
+                errorMessage += ` (${errorData.details})`;
+              }
+            } catch (e) {
+              console.error('[Files API] Could not parse error JSON:', e);
+              // If it's not JSON, maybe it's a plain text error from the server
+              errorMessage = text.substring(0, 200) + (text.length > 200 ? '...' : '');
+            }
           }
+        } catch (readError) {
+          console.error('[Files API] Could not read error response text:', readError);
+        }
+
+        // Provide specific error messages for common cases override
+        if (response.status === 401) {
+          errorMessage = 'Authentication failed. Please log in again.';
+        } else if (response.status === 404) {
+          errorMessage = 'Block not found. Please refresh the page and try again.';
+        } else if (response.status === 400 && errorData && errorData.error) {
+          // Keep the specific 400 error
+        } else if (response.status === 500 && !errorMessage.includes('Failed to')) {
+          // Only use generic if we didn't get a specific one
+          errorMessage = 'Server error. Please try again or contact support.';
         }
 
         throw new Error(errorMessage);
@@ -373,6 +384,22 @@ export const contentApi = {
       throw new Error(error.error || 'Failed to dislike caption');
     }
   },
+
+  modify: async (caption: string, platform: string, instructions: string): Promise<string> => {
+    const response = await fetch(`${API_BASE}/content`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+      body: JSON.stringify({ action: 'modify', caption, platform, instructions }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to modify caption' }));
+      throw new Error(error.error || 'Failed to modify caption');
+    }
+
+    const data = await response.json();
+    return data.modifiedCaption;
+  },
 };
 
 // Images API
@@ -447,6 +474,40 @@ export const imagesApi = {
       const error = await response.json().catch(() => ({ error: 'Failed to dislike image' }));
       throw new Error(error.error || 'Failed to dislike image');
     }
+  },
+
+  modify: async (
+    imageUrl: string,
+    originalPrompt: string,
+    instructions: string,
+    platform?: string,
+    logoBase64?: string,
+    logoMimeType?: string,
+    logoPosition?: { x: number; y: number; scale: number },
+    logos?: Array<{ id: string; base64: string; mimeType: string; x: number; y: number; scale: number; removeBackground?: boolean }>
+  ): Promise<{ imageUrl: string; enhancedPrompt: string }> => {
+    const response = await fetch(`${API_BASE}/images`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+      body: JSON.stringify({
+        action: 'modify',
+        imageUrl,
+        originalPrompt,
+        instructions,
+        platform,
+        logoBase64,
+        logoMimeType,
+        logoPosition,
+        logos
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to modify image' }));
+      throw new Error(error.error || 'Failed to modify image');
+    }
+
+    return response.json();
   },
 };
 

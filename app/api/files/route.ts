@@ -17,11 +17,11 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const documentBlockId = formData.get('blockId') as string;
-    
+
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
-    
+
     if (!documentBlockId) {
       return NextResponse.json({ error: 'No blockId provided' }, { status: 400 });
     }
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/msword'
     ];
-    
+
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 });
     }
@@ -55,21 +55,21 @@ export async function POST(request: NextRequest) {
 
     // Process the file
     const buffer = await file.arrayBuffer();
-    
+
     // Handle different file types appropriately
     let content: string;
-    const isTextFile = file.type.startsWith('text/') || 
-                      file.type === 'application/json' ||
-                      file.type === 'application/javascript' ||
-                      file.type === 'application/typescript';
-    
+    const isTextFile = file.type.startsWith('text/') ||
+      file.type === 'application/json' ||
+      file.type === 'application/javascript' ||
+      file.type === 'application/typescript';
+
     if (isTextFile) {
       content = new TextDecoder().decode(buffer);
     } else {
       // For binary files (PDF, DOCX), convert to base64 for processing
       content = Buffer.from(buffer).toString('base64');
     }
-    
+
     // Create file record
     const fileRecord = await fileProcessor.processFile({
       name: file.name,
@@ -96,10 +96,16 @@ export async function POST(request: NextRequest) {
 
     // Generate vectors for the content (chunked)
     const chunks = fileProcessor.chunkText(extractedText, 2000, 200);
-    
+
     // Store each chunk as a vector
     for (let i = 0; i < chunks.length; i++) {
       const chunkId = `chunk_${documentId}_${i}`;
+
+      // Add a small delay between chunks to avoid hitting rate limits (quota exceeded)
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
       await vectorStore.storeChunk(
         chunkId,
         userId,
@@ -153,7 +159,7 @@ export async function GET(request: NextRequest) {
       // Get all user's files (new functionality)
       files = await knowledgeBase.getDocumentsByUserId(userId);
     }
-    
+
     const normalizedFiles = (files || []).map((file: any) => ({
       id: file.id,
       name: file.name ?? file.fileName ?? file.file_name ?? 'Untitled document',
@@ -182,7 +188,7 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const fileId = searchParams.get('fileId');
-    
+
     if (!fileId) {
       return NextResponse.json({ error: 'File ID required' }, { status: 400 });
     }

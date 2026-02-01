@@ -172,7 +172,7 @@ ${baseInstructions[platform] || baseInstructions.linkedin}
           // Get liked and disliked caption styles for this platform
           const likedCaptionType = `liked_caption_style_${platform}`;
           const dislikedCaptionType = `disliked_caption_style_${platform}`;
-          
+
           const likedStyles = await userMemoryService.getMemoriesByType(
             userContext.profile.user_id,
             likedCaptionType
@@ -206,6 +206,49 @@ ${baseInstructions[platform] || baseInstructions.linkedin}
     contextPrompt += `\n${platform} caption:`;
 
     return contextPrompt;
+  }
+
+  /**
+   * Modify an existing caption based on user instructions
+   */
+  async modifyCaption(
+    caption: string,
+    platform: string,
+    instructions: string
+  ): Promise<string> {
+    const limits: Record<string, number> = {
+      linkedin: 3000,
+      twitter: 25000,
+      instagram: 2200,
+      facebook: 63206,
+    };
+
+    const prompt = `You are a Social Media Content Editor.
+
+TASK: Modify the following ${platform.toUpperCase()} caption based on the user's instructions.
+
+CRITICAL RULES:
+1. OUTPUT ONLY THE MODIFIED CAPTION TEXT.
+2. DO NOT say "Here is the modified caption" or add any preamble.
+3. DO NOT use quotation marks around the output.
+4. Keep the caption within ${limits[platform] || 3000} characters.
+5. Preserve the overall message and intent, only apply the requested modifications.
+
+CURRENT CAPTION:
+${caption}
+
+USER'S MODIFICATION REQUEST:
+${instructions}
+
+MODIFIED ${platform.toUpperCase()} CAPTION:`;
+
+    try {
+      const modifiedCaption = await aiService.generateContent(prompt);
+      return modifiedCaption.trim();
+    } catch (error) {
+      console.error(`Error modifying caption for ${platform}:`, error);
+      throw new Error('Failed to modify caption');
+    }
   }
 
   private formatContent(platform: string, content: string): string {

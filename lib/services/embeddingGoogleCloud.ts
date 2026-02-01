@@ -99,8 +99,8 @@ export class GoogleCloudEmbeddingService {
 
       // Implement simple exponential backoff retry for quota errors
       let retries = 0;
-      const maxRetries = 3;
-      
+      const maxRetries = 5;
+
       while (true) {
         try {
           const [response] = await this.client.predict(request);
@@ -136,14 +136,14 @@ export class GoogleCloudEmbeddingService {
             if (retries >= maxRetries) {
               throw new Error(`Google Cloud quota exceeded after ${maxRetries} retries: ${errorMessage}`);
             }
-            
+
             const delay = Math.pow(2, retries) * 1000 + Math.random() * 1000; // Exponential backoff + jitter
             console.warn(`[Embedding] Quota exceeded. Retrying in ${Math.round(delay)}ms... (Attempt ${retries + 1}/${maxRetries})`);
             await new Promise(resolve => setTimeout(resolve, delay));
             retries++;
             continue;
           }
-          
+
           throw error;
         }
       }

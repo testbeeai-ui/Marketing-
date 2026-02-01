@@ -8,8 +8,18 @@ import { getUserIdFromRequest } from '@/lib/auth-server';
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { action, storyId, storyContent, platforms, imageContext, caption, platform } = body;
+        const { action, storyId, storyContent, platforms, imageContext, caption, platform, instructions } = body;
         const userId = await getUserIdFromRequest(request);
+
+        // Modify caption
+        if (action === 'modify') {
+            if (!caption || !platform || !instructions) {
+                return NextResponse.json({ error: 'caption, platform, and instructions are required' }, { status: 400 });
+            }
+
+            const modifiedCaption = await contentCreator.modifyCaption(caption, platform, instructions);
+            return NextResponse.json({ modifiedCaption });
+        }
 
         // Like caption
         if (action === 'like') {
