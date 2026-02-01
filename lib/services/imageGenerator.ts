@@ -719,7 +719,7 @@ YOUR MODIFIED PROMPT (Only output the prompt, nothing else):`;
     const targetLogoWidth = Math.round(bgWidth * scale);
 
     // Step 1: Handle Background (Smart Removal vs Original)
-    let logoToComposite = logoBuffer;
+    let logoToComposite: any = logoBuffer;
 
     // If user explicitly requests background removal
     if (logoPosition?.removeBackground) {
