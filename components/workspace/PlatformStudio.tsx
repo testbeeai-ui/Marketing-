@@ -963,11 +963,24 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
       const base64 = result.split(',')[1];
       const mimeType = file.type || 'image/png';
       setUploadedLogo({ base64, mimeType });
-      // Show the interactive logo editor
-      setShowLogoEditor(true);
-      setShowModifyImageDialog(false); // Close the modify dialog
+
+      // Auto-open Logo Studio if no text instructions
+      // If user has text, keep dialog open for AI processing
+      if (!modifyImageInstructions.trim()) {
+        // No text = user wants manual logo placement
+        setShowLogoEditor(true);
+        setShowModifyImageDialog(false);
+      }
+      // With text = stay in dialog, user will click "Apply Changes" for AI processing
     };
     reader.readAsDataURL(file);
+  };
+
+  // Open Logo Studio for manual logo placement (no AI processing)
+  const handleOpenLogoStudio = () => {
+    if (!uploadedLogo) return;
+    setShowLogoEditor(true);
+    setShowModifyImageDialog(false);
   };
 
   // Handle logo editor apply - composite multiple logos at user-specified positions
@@ -2274,16 +2287,27 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                               />
                             </div>
                             <div className="flex flex-col">
-                              <span className="text-sm font-medium text-green-600 dark:text-green-400">Logo uploaded</span>
-                              <span className="text-[10px] text-muted-foreground">Exact Overlay (Bottom-Right)</span>
+                              <span className="text-sm font-medium text-green-600 dark:text-green-400">Image uploaded</span>
+                              <span className="text-[10px] text-muted-foreground">
+                                {modifyImageInstructions.trim() ? 'Will be used with AI modifications' : 'Click Logo Studio for precise placement'}
+                              </span>
                             </div>
                           </div>
-                          <button
-                            onClick={() => setUploadedLogo(null)}
-                            className="text-sm text-destructive hover:underline px-2"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleOpenLogoStudio}
+                              className="text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                              title="Open Logo Studio for precise placement"
+                            >
+                              Logo Studio
+                            </button>
+                            <button
+                              onClick={() => setUploadedLogo(null)}
+                              className="text-sm text-destructive hover:underline px-2"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <label className="cursor-pointer">
@@ -2307,13 +2331,19 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                   </div>
 
                   <div className="text-xs text-muted-foreground bg-secondary/50 rounded-lg p-3">
-                    <strong>Examples:</strong>
+                    <strong>How it works:</strong>
                     <ul className="mt-1 space-y-0.5 list-disc list-inside">
-                      <li>"Add my logo in the bottom-right corner"</li>
-                      <li>"Change the background to a gradient"</li>
-                      <li>"Make the colors more vibrant"</li>
-                      <li>"Add text overlay saying 'SALE'"</li>
+                      <li><strong>With text:</strong> AI understands your instructions and modifies the image</li>
+                      <li><strong>Upload only:</strong> Click "Logo Studio" for precise manual placement</li>
                     </ul>
+                    <div className="mt-2 pt-2 border-t border-border/50">
+                      <strong>Example instructions:</strong>
+                      <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                        <li>"Add my logo and make the background more vibrant"</li>
+                        <li>"Change colors to match our brand palette"</li>
+                        <li>"Add text overlay saying 'SALE'"</li>
+                      </ul>
+                    </div>
                   </div>
                 </div>
 

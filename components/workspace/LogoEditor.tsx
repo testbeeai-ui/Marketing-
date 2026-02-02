@@ -494,7 +494,7 @@ export function LogoEditor({
 
     return (
         <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4">
-            <div className="relative w-full max-w-5xl bg-background rounded-xl overflow-hidden shadow-2xl flex flex-col h-[90vh]">
+            <div className="relative w-full max-w-5xl bg-background rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh] md:max-h-[90vh]">
 
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b bg-secondary/30 shrink-0">
@@ -503,8 +503,8 @@ export function LogoEditor({
                             <Move className="w-5 h-5 text-primary" />
                         </div>
                         <div>
-                            <h3 className="font-semibold text-lg">Logo Studio</h3>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                            <h3 className="font-semibold text-base md:text-lg">Logo Studio</h3>
+                            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                                 <span className="flex items-center gap-1"><Keyboard className="w-3 h-3" /> Arrows to nudge</span>
                                 <span>•</span>
                                 <span>Shift+Arrow for jump</span>
@@ -562,7 +562,7 @@ export function LogoEditor({
                             src={imageUrl}
                             alt="Edit canvas"
                             onLoad={handleImageLoad}
-                            className="max-h-[60vh] object-contain select-none pointer-events-none"
+                            className="max-h-[40vh] md:max-h-[55vh] lg:max-h-[60vh] w-auto object-contain select-none pointer-events-none"
                             draggable={false}
                         />
 
@@ -629,9 +629,9 @@ export function LogoEditor({
                 </div>
 
                 {/* Toolbar */}
-                <div className="p-6 border-t bg-background shrink-0 space-y-4">
+                <div className="px-3 py-3 md:px-6 md:py-4 border-t bg-background shrink-0 space-y-3 md:space-y-4 overflow-x-auto">
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                         {/* Logo Selector / Add */}
                         <div className="flex items-center gap-3">
                             <div className="flex -space-x-2 overflow-hidden py-1 pl-1">
@@ -681,9 +681,9 @@ export function LogoEditor({
 
                         {/* Controls for Selected Logo */}
                         {selectedLogo ? (
-                            <div className="flex items-center gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            <div className="flex flex-wrap items-center gap-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
                                 {/* Size Slider */}
-                                <div className="flex items-center gap-3 bg-secondary/30 px-3 py-1.5 rounded-full">
+                                <div className="flex items-center gap-2 md:gap-3 bg-secondary/30 px-2 md:px-3 py-1.5 rounded-full">
                                     <ZoomOut className="w-4 h-4 text-muted-foreground" />
                                     <input
                                         type="range"
@@ -692,12 +692,12 @@ export function LogoEditor({
                                         step="0.01"
                                         value={selectedLogo.scale}
                                         onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
-                                        className="w-32 h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                                        className="w-20 md:w-32 h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
                                     />
                                     <ZoomIn className="w-4 h-4 text-muted-foreground" />
                                 </div>
 
-                                <div className="h-8 w-px bg-border" />
+                                <div className="hidden md:block h-8 w-px bg-border" />
 
                                 {/* Quick Align */}
                                 <div className="flex gap-1">
@@ -721,7 +721,7 @@ export function LogoEditor({
                                     </Button>
                                 </div>
 
-                                <div className="h-8 w-px bg-border" />
+                                <div className="hidden md:block h-8 w-px bg-border" />
 
                                 {/* Background Toggle */}
                                 <Button
@@ -734,16 +734,16 @@ export function LogoEditor({
                                     <Eraser className="w-4 h-4" />
                                 </Button>
 
-                                <div className="h-8 w-px bg-border" />
+                                <div className="hidden md:block h-8 w-px bg-border" />
 
                                 <Button
                                     variant="destructive"
                                     size="sm"
                                     onClick={handleDeleteLogo}
-                                    className="h-9 gap-2"
+                                    className="h-9 gap-1 md:gap-2"
                                 >
                                     <Trash2 className="w-4 h-4" />
-                                    Remove
+                                    <span className="hidden sm:inline">Remove</span>
                                 </Button>
                             </div>
                         ) : (
@@ -754,7 +754,7 @@ export function LogoEditor({
                     </div>
 
                     {/* Bottom Action Bar */}
-                    <div className="flex items-center justify-between pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 md:pt-4">
                         <Button
                             variant="ghost"
                             onClick={handleReset}
@@ -763,8 +763,7 @@ export function LogoEditor({
                             <RotateCcw className="w-4 h-4 mr-2" />
                             Reset All
                         </Button>
-
-                        <div className="flex gap-3">
+                        <div className="flex gap-2 md:gap-3">
                             <Button variant="secondary" size="lg" onClick={onCancel}>
                                 Cancel
                             </Button>
