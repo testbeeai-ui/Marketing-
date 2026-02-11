@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
     }
 }
 
-// DELETE /api/style-profile?category=xxx&platform=xxx
+// DELETE /api/style-profile?category=stories|captions|images&platform=linkedin|instagram|twitter|facebook (platform optional for captions/images)
 export async function DELETE(request: NextRequest) {
     try {
         const userId = await getNumericUserIdFromRequest(request);
@@ -138,7 +138,52 @@ export async function DELETE(request: NextRequest) {
         const category = searchParams.get('category');
         const platform = searchParams.get('platform');
 
-        return NextResponse.json({ success: true, message: `Cleared ${category} preferences for ${platform}` });
+        const validCategories = ['stories', 'captions', 'images'];
+        if (!category || !validCategories.includes(category)) {
+            return NextResponse.json({ error: 'category must be one of: stories, captions, images' }, { status: 400 });
+        }
+
+        const platforms = ['linkedin', 'instagram', 'twitter', 'facebook'];
+        if (platform && !platforms.includes(platform.toLowerCase())) {
+            return NextResponse.json({ error: 'platform must be one of: linkedin, instagram, twitter, facebook' }, { status: 400 });
+        }
+
+        let memoryTypes: string[] = [];
+
+        if (category === 'stories') {
+            memoryTypes = [
+                MEMORY_TYPES.LIKED_STORY_STYLE_PROFESSIONAL,
+                MEMORY_TYPES.DISLIKED_STORY_STYLE_PROFESSIONAL,
+                MEMORY_TYPES.LIKED_STORY_STYLE_VIRAL,
+                MEMORY_TYPES.DISLIKED_STORY_STYLE_VIRAL,
+                MEMORY_TYPES.LIKED_STORY_STYLE_STORYTELLER,
+                MEMORY_TYPES.DISLIKED_STORY_STYLE_STORYTELLER,
+            ];
+        } else if (category === 'captions') {
+            const targets = platform ? [platform.toLowerCase()] : platforms;
+            targets.forEach(p => {
+                memoryTypes.push(`liked_caption_style_${p}`, `disliked_caption_style_${p}`);
+            });
+        } else if (category === 'images') {
+            if (platform) {
+                const p = platform.toLowerCase();
+                memoryTypes = [`liked_image_style_${p}`, `disliked_image_style_${p}`];
+            } else {
+                memoryTypes = [MEMORY_TYPES.LIKED_IMAGE_STYLE, MEMORY_TYPES.DISLIKED_IMAGE_STYLE];
+                platforms.forEach(p => {
+                    memoryTypes.push(`liked_image_style_${p}`, `disliked_image_style_${p}`);
+                });
+            }
+        }
+
+        const ok = await userMemoryService.deleteMemoriesByTypes(userId, memoryTypes);
+
+        if (!ok) {
+            return NextResponse.json({ error: 'Failed to clear preferences' }, { status: 500 });
+        }
+
+        const scope = platform ? `${platform}` : 'all platforms';
+        return NextResponse.json({ success: true, message: `Cleared ${category} preferences for ${scope}` });
     } catch (error: any) {
         console.error('Error clearing style preferences:', error);
         return NextResponse.json({ error: error.message || 'Failed to clear preferences' }, { status: 500 });

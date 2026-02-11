@@ -48,6 +48,8 @@ next-env.d.ts
 # secrets
 lib/services/gcp-key.json
 server/gcp-key.json
+gcp-key.json
+gcp.json
 
 # Build artifacts and cache
 .next/
@@ -56,3 +58,6 @@ server/gcp-key.json
 *.blob
 .cache/
 turbopack/
+
+# StoryTeller local store (when STORYTELLER_USE_LOCAL_STORE=true)
+.data/

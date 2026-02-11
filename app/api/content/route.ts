@@ -13,6 +13,9 @@ export async function POST(request: NextRequest) {
 
         // Modify caption
         if (action === 'modify') {
+            if (!userId) {
+                return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+            }
             if (!caption || !platform || !instructions) {
                 return NextResponse.json({ error: 'caption, platform, and instructions are required' }, { status: 400 });
             }
@@ -84,6 +87,9 @@ export async function POST(request: NextRequest) {
 
         // Generate content
         if (action === 'generate') {
+            if (!userId) {
+                return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+            }
             if (!platforms || !Array.isArray(platforms) || (!storyId && !storyContent)) {
                 return NextResponse.json({ error: 'storyId or storyContent and platforms are required' }, { status: 400 });
             }
@@ -92,7 +98,7 @@ export async function POST(request: NextRequest) {
                 storyId,
                 storyContent,
                 platforms,
-                userId: userId || undefined,
+                userId,
                 imageContext
             });
             return NextResponse.json({ contents });

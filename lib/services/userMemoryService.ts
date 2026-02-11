@@ -202,6 +202,30 @@ export class UserMemoryService {
   }
 
   /**
+   * Delete all memories for a user matching the given memory types
+   */
+  async deleteMemoriesByTypes(userId: string, memoryTypes: string[]): Promise<boolean> {
+    if (!isDatabaseAvailable()) {
+      console.log(`[UserMemoryService] Database not available, cannot delete memories for user ${userId}`);
+      return false;
+    }
+    if (memoryTypes.length === 0) return true;
+
+    const { error } = await supabase!
+      .from('user_memories')
+      .delete()
+      .eq('user_id', userId)
+      .in('memory_type', memoryTypes);
+
+    if (error) {
+      console.warn(`[UserMemoryService] Could not delete memories by types: ${error.message}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Clear all memories for a user
    */
   async clearAllMemories(userId: string): Promise<boolean> {
