@@ -37,6 +37,9 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET endpoint to check cache status
+ * Note: localStorage/IndexedDB are client-only. We cannot inspect them server-side.
+ * We return a conservative hint based on whether the user is authenticated
+ * (POST cleanup still works to clear server-side state if any is added later).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -45,24 +48,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
-    // Check if user has any cached data that might need cleanup
-    let hasCachedData = false;
-    
-    if (typeof window !== 'undefined') {
-      // Check localStorage for user-related keys
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.includes(userId)) {
-          hasCachedData = true;
-          break;
-        }
-      }
-    }
-    
+    // Server cannot access client localStorage/IndexedDB. Return hint for client to run
+    // its own check or simply try POST cleanup. hasCachedData stays false server-side.
     return NextResponse.json({ 
       userId,
-      hasCachedData,
-      message: hasCachedData ? 'User has cached data that may need cleanup' : 'No cached data found'
+      hasCachedData: false,
+      message: 'Cache status is client-only (localStorage/IndexedDB). Call POST to clear caches.'
     });
     
   } catch (error: any) {

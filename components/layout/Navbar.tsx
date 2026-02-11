@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Sparkles, Sun, Moon, LogOut, UserCog } from "lucide-react";
+import { Sparkles, Sun, Moon, LogOut, UserCog, BarChart3, Presentation, ChevronDown, LayoutDashboard, Twitter, Linkedin, Instagram, Facebook } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,10 +13,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { authService } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { useDemoMode } from "@/lib/contexts/DemoModeContext";
 
 /**
  * ERR_ABORTED Error Explanation:
@@ -31,9 +32,19 @@ import { toast } from "sonner";
  * so the user experience is not broken, but we should provide a local alternative.
  */
 
+const ANALYTICS_OPTIONS = [
+  { label: "Overall", href: "/storyteller", icon: LayoutDashboard },
+  { label: "X (Twitter)", href: "/storyteller/x", icon: Twitter },
+  { label: "LinkedIn", href: "/storyteller/linkedin", icon: Linkedin },
+  { label: "Instagram", href: "/storyteller/instagram", icon: Instagram },
+  { label: "Facebook", href: "/storyteller/facebook", icon: Facebook },
+] as const;
+
 export const Navbar = () => {
   const { theme, setTheme } = useTheme();
+  const { demoMode, toggleDemoMode } = useDemoMode();
   const router = useRouter();
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [avatarError, setAvatarError] = useState(false);
@@ -105,7 +116,7 @@ export const Navbar = () => {
       animate={{ y: 0, opacity: 1 }}
       className="fixed top-0 left-0 right-0 z-50 h-16 glass-panel border-t-0 border-x-0 rounded-none"
     >
-      <div className="h-full max-w-7xl mx-auto px-6 flex items-center justify-between">
+      <div className="relative h-full max-w-7xl mx-auto px-6 flex items-center justify-between">
         <motion.div
           className="flex items-center gap-3 cursor-pointer"
           whileHover={{ scale: 1.02 }}
@@ -121,7 +132,52 @@ export const Navbar = () => {
           </span>
         </motion.div>
 
+        {/* Analytics dropdown */}
+        <div className="absolute left-1/2 -translate-x-1/2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="gap-2 text-foreground hover:bg-secondary font-medium"
+              >
+                <BarChart3 className="w-4 h-4" />
+                Analytics
+                <ChevronDown className="w-4 h-4 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" className="w-48">
+              {ANALYTICS_OPTIONS.map(({ label, href, icon: Icon }) => {
+                const isActive = pathname === href || (href !== "/storyteller" && pathname.startsWith(href));
+                return (
+                  <DropdownMenuItem
+                    key={href}
+                    onClick={() => router.push(href)}
+                    className={`cursor-pointer ${isActive ? "bg-primary/10 text-primary" : ""}`}
+                  >
+                    <Icon className="w-4 h-4 mr-2" />
+                    {label}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
         <div className="flex items-center gap-3">
+          {/* Demo Mode Toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleDemoMode}
+            className={`w-10 h-10 rounded-lg transition-colors ${
+              demoMode ? "bg-primary/15 text-primary" : "hover:bg-secondary"
+            }`}
+            aria-label={demoMode ? "Demo mode on (showing sample data)" : "Demo mode off (showing your data)"}
+            title={demoMode ? "Demo mode: Showing sample data. Click to show your data." : "Demo mode: Showing your data. Click to show sample data."}
+          >
+            <Presentation className="w-5 h-5" />
+          </Button>
+
           {/* Theme Toggle */}
           {mounted && (
             <Button
@@ -172,6 +228,10 @@ export const Navbar = () => {
                   <DropdownMenuSeparator />
                 </>
               )}
+              <DropdownMenuItem onClick={() => router.push('/storyteller')} className="cursor-pointer">
+                <BarChart3 className="w-4 h-4 mr-2" />
+                StoryTeller Analytics
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => router.push('/style-profile')} className="cursor-pointer">
                 <UserCog className="w-4 h-4 mr-2" />
                 My Style Profile

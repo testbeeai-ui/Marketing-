@@ -208,6 +208,23 @@ const Dashboard = () => {
           {/* Cache Cleanup Banner */}
           <CacheCleanupBanner />
 
+          {/* Top Navigation: Blocks vs Analytics */}
+          <div className="mb-6 flex items-center gap-3">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-full text-sm font-medium bg-primary text-primary-foreground shadow-sm"
+            >
+              Blocks
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/storyteller')}
+              className="px-3 py-1.5 rounded-full text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              Analytics
+            </button>
+          </div>
+
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}

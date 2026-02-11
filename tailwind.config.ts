@@ -75,6 +75,10 @@ export default {
                     border: "hsl(var(--sidebar-border))",
                     ring: "hsl(var(--sidebar-ring))",
                 },
+                storyteller: {
+                    primary: "#7C3AED",
+                    secondary: "#F97316",
+                },
             },
             borderRadius: {
                 lg: "var(--radius)",
