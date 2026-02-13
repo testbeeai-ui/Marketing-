@@ -109,7 +109,8 @@ export async function listByUserSupabase(
   limit: number,
   platform?: string,
   snapshotType?: 'dashboard' | 'post',
-  dateRange?: { from?: string; to?: string }
+  dateRange?: { from?: string; to?: string },
+  organizationId?: string
 ): Promise<AnalyticsSnapshotRow[]> {
   let query = supabase
     .from('analytics_snapshots')
@@ -117,6 +118,11 @@ export async function listByUserSupabase(
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(snapshotType || dateRange ? Math.max(limit * 3, 50) : limit);
+  
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId);
+  }
+  
   if (platform) {
     query = query.ilike('platform', platform);
   }
@@ -167,12 +173,18 @@ export async function insertSupabase(
   platform: string,
   storagePath: string,
   extractedData: Record<string, unknown>,
-  aiInsights: Record<string, unknown> | null
+  aiInsights: Record<string, unknown> | null,
+  organizationId: string
 ): Promise<AnalyticsSnapshotRow> {
+  if (!organizationId) {
+    throw new Error('Organization ID is required to create an analytics snapshot');
+  }
+
   const { data, error } = await supabase
     .from('analytics_snapshots')
     .insert({
       user_id: userId,
+      organization_id: organizationId,
       platform,
       image_url: storagePath,
       extracted_data: extractedData,
@@ -181,7 +193,19 @@ export async function insertSupabase(
     .select('id, platform, image_url, extracted_data, ai_insights, created_at')
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (
+      error.message?.includes('organization_id') ||
+      error.message?.includes('schema cache') ||
+      error.code === '42703'
+    ) {
+      throw new Error(
+        `Database migration not applied: The 'organization_id' column is missing from the 'analytics_snapshots' table. ` +
+        `Please run migration: 20250212000006_add_organization_id_to_tables.sql (see MIGRATION_GUIDE.md)`
+      );
+    }
+    throw error;
+  }
 
   return {
     id: data.id,

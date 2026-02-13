@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Components - Vanilla JS Examples</title>
+</head>
+<body>
+    <h1>Social Media Analytics - Vanilla JavaScript Examples</h1>
+    <p>Copy and paste these scripts into your HTML pages.</p>
+
+    <!-- Twitter Analytics -->
+    <section>
+        <h2>Twitter Analytics</h2>
+        <pre><code>
+&lt;!-- Twitter Universal Website Tag --&gt;
+&lt;script&gt;
+!function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);
+},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',
+a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
+twq('config','YOUR_TWITTER_PIXEL_ID');
+&lt;/script&gt;
+&lt;noscript&gt;
+&lt;img height="1" width="1" style="display:none;" alt="" src="https://static.ads-twitter.com/uwt.js" /&gt;
+&lt;/noscript&gt;
+        </code></pre>
+    </section>
+
+    <!-- Instagram Analytics -->
+    <section>
+        <h2>Instagram Analytics (Meta Pixel)</h2>
+        <pre><code>
+&lt;!-- Meta Pixel Code --&gt;
+&lt;script&gt;
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', 'YOUR_INSTAGRAM_PIXEL_ID');
+fbq('track', 'PageView');
+&lt;/script&gt;
+&lt;noscript&gt;
+&lt;img height="1" width="1" style="display:none;"
+src="https://www.facebook.com/tr?id=YOUR_INSTAGRAM_PIXEL_ID&ev=PageView&noscript=1" /&gt;
+&lt;/noscript&gt;
+        </code></pre>
+    </section>
+
+    <!-- LinkedIn Analytics -->
+    <section>
+        <h2>LinkedIn Analytics</h2>
+        <pre><code>
+&lt;!-- LinkedIn Insight Tag --&gt;
+&lt;script type="text/javascript"&gt;
+_linkedin_partner_id = "YOUR_LINKEDIN_PARTNER_ID";
+window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
+window._linkedin_data_partner_ids.push(_linkedin_partner_id);
+&lt;/script&gt;
+&lt;script type="text/javascript"&gt;
+(function(l) {
+if (!l){window.lintrk = function(a,b){window.lintrk.q.push([a,b])};
+window.lintrk.q=[]}
+var s = document.getElementsByTagName("script")[0];
+var b = document.createElement("script");
+b.type = "text/javascript";b.async = true;
+b.src = "https://snap.licdn.com/li.lms-analytics/insight.min.js";
+s.parentNode.insertBefore(b, s);})(window.lintrk);
+&lt;/script&gt;
+&lt;noscript&gt;
+&lt;img height="1" width="1" style="display:none;" alt=""
+src="https://px.ads.linkedin.com/collect/?pid=YOUR_LINKEDIN_PARTNER_ID&fmt=gif" /&gt;
+&lt;/noscript&gt;
+        </code></pre>
+    </section>
+
+    <!-- Facebook Analytics -->
+    <section>
+        <h2>Facebook Analytics</h2>
+        <pre><code>
+&lt;!-- Facebook Pixel Code --&gt;
+&lt;script&gt;
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', 'YOUR_FACEBOOK_PIXEL_ID');
+fbq('track', 'PageView');
+&lt;/script&gt;
+&lt;noscript&gt;
+&lt;img height="1" width="1" style="display:none;"
+src="https://www.facebook.com/tr?id=YOUR_FACEBOOK_PIXEL_ID&ev=PageView&noscript=1" /&gt;
+&lt;/noscript&gt;
+        </code></pre>
+    </section>
+
+    <!-- Custom Event Tracking Examples -->
+    <section>
+        <h2>Custom Event Tracking</h2>
+        
+        <h3>Facebook/Instagram Custom Events</h3>
+        <pre><code>
+&lt;script&gt;
+// Track Purchase
+fbq('track', 'Purchase', {
+    value: 29.99,
+    currency: 'USD',
+    content_name: 'Product Name'
+});
+
+// Track Add to Cart
+fbq('track', 'AddToCart', {
+    value: 19.99,
+    currency: 'USD'
+});
+
+// Track Custom Event
+fbq('trackCustom', 'CustomEventName', {
+    customParameter: 'value'
+});
+&lt;/script&gt;
+        </code></pre>
+
+        <h3>Twitter Custom Events</h3>
+        <pre><code>
+&lt;script&gt;
+twttr.conversion.track('YOUR_TWITTER_PIXEL_ID');
+&lt;/script&gt;
+        </code></pre>
+
+        <h3>LinkedIn Custom Events</h3>
+        <pre><code>
+&lt;script&gt;
+lintrk('track', { conversion_id: 'YOUR_LINKEDIN_PARTNER_ID' });
+&lt;/script&gt;
+        </code></pre>
+    </section>
+
+</body>
+</html>

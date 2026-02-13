@@ -1,15 +1,21 @@
 import { authService } from './auth';
+import { supabase } from './supabase';
 
 const API_BASE = '/api';
 
-// Helper to get auth headers
+// Helper to get auth headers - prefer Supabase session (same as OrganizationContext) so token is sent when logged in
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  const token = await authService.getSessionToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  try {
+    if (typeof window !== 'undefined') {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? (await authService.getSessionToken()) ?? null;
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+  } catch (e) {
+    // Ignore
   }
   return headers;
 }
@@ -66,9 +72,12 @@ export interface StoryResponse {
 
 // Blocks API
 export const blocksApi = {
-  getAll: async (): Promise<Block[]> => {
+  getAll: async (organizationId: string): Promise<Block[]> => {
+    if (!organizationId) {
+      throw new Error('Organization ID is required');
+    }
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/blocks`, {
+    const response = await fetch(`${API_BASE}/blocks?organizationId=${organizationId}`, {
       method: 'GET',
       headers,
     });
@@ -81,9 +90,12 @@ export const blocksApi = {
     return response.json();
   },
 
-  getById: async (id: string): Promise<Block> => {
+  getById: async (id: string, organizationId: string): Promise<Block> => {
+    if (!organizationId) {
+      throw new Error('Organization ID is required');
+    }
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/blocks?id=${id}`, {
+    const response = await fetch(`${API_BASE}/blocks?id=${id}&organizationId=${organizationId}`, {
       method: 'GET',
       headers,
     });
@@ -96,12 +108,15 @@ export const blocksApi = {
     return response.json();
   },
 
-  create: async (name: string, description: string): Promise<Block> => {
+  create: async (name: string, description: string, organizationId: string): Promise<Block> => {
+    if (!organizationId) {
+      throw new Error('Organization ID is required');
+    }
     const headers = await getAuthHeaders();
     const response = await fetch(`${API_BASE}/blocks`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ name, description }),
+      body: JSON.stringify({ name, description, organizationId }),
     });
 
     if (!response.ok) {
@@ -112,12 +127,15 @@ export const blocksApi = {
     return response.json();
   },
 
-  update: async (id: string, name: string, description: string): Promise<Block> => {
+  update: async (id: string, name: string, description: string, organizationId: string): Promise<Block> => {
+    if (!organizationId) {
+      throw new Error('Organization ID is required');
+    }
     const headers = await getAuthHeaders();
     const response = await fetch(`${API_BASE}/blocks`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ id, name, description }),
+      body: JSON.stringify({ id, name, description, organizationId }),
     });
 
     if (!response.ok) {
@@ -128,9 +146,12 @@ export const blocksApi = {
     return response.json();
   },
 
-  delete: async (id: string): Promise<void> => {
+  delete: async (id: string, organizationId: string): Promise<void> => {
+    if (!organizationId) {
+      throw new Error('Organization ID is required');
+    }
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/blocks?id=${id}`, {
+    const response = await fetch(`${API_BASE}/blocks?id=${id}&organizationId=${organizationId}`, {
       method: 'DELETE',
       headers,
     });
@@ -144,7 +165,7 @@ export const blocksApi = {
 
 // Files API
 export const filesApi = {
-  upload: async (file: File, blockId: string): Promise<FileItem> => {
+  upload: async (file: File, blockId: string, organizationId: string): Promise<FileItem> => {
     try {
       const token = await authService.getSessionToken();
       console.log('[Files API] Uploading file:', file.name, 'to block:', blockId);
@@ -159,9 +180,15 @@ export const filesApi = {
         throw new Error('Block ID is required. Please select a block first.');
       }
 
+      if (!organizationId) {
+        console.error('[Files API] No organizationId provided');
+        throw new Error('Organization ID is required.');
+      }
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('blockId', blockId);
+      formData.append('organizationId', organizationId);
 
       const headers: Record<string, string> = {};
       if (token) {
@@ -551,6 +578,143 @@ export const authApi = {
 
     if (!response.ok) {
       throw new Error('Failed to logout');
+    }
+
+    return response.json();
+  },
+};
+
+// Approvals API
+export interface ApprovalRequest {
+  sub_block_id: string;
+  story_id?: string;
+  platform_contents: {
+    linkedin?: { text?: string; imageUrl?: string; imagePrompt?: string };
+    twitter?: { text?: string; imageUrl?: string; imagePrompt?: string };
+    instagram?: { text?: string; imageUrl?: string; imagePrompt?: string };
+    facebook?: { text?: string; imageUrl?: string; imagePrompt?: string };
+  };
+  content_type: 'text' | 'image' | 'both';
+  platforms: string[];
+  assigned_to: string | string[] | 'all_members';
+}
+
+/** Per-asset feedback: platform id -> { text?, image? } */
+export type ChangesRequestedPerAsset = Record<string, { text?: string; image?: string }>;
+
+export interface Approval {
+  id: string;
+  organization_id: string;
+  sub_block_id: string;
+  story_id?: string;
+  created_by: string;
+  assigned_to: string;
+  platform_contents: Record<string, any>;
+  content_type: 'text' | 'image' | 'both';
+  platforms: string[];
+  status: 'pending' | 'approved' | 'changes_requested' | 'rejected';
+  changes_requested?: string;
+  changes_requested_per_asset?: ChangesRequestedPerAsset;
+  block_id?: string;
+  approved_at?: string;
+  approved_by?: string;
+  created_at: string;
+  updated_at: string;
+  creator_email?: string;
+  assignee_email?: string;
+  approver_email?: string;
+}
+
+export const approvalsApi = {
+  create: async (organizationId: string, approvalData: ApprovalRequest): Promise<{ success: boolean; approvals: Approval[]; count: number }> => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/organizations/${organizationId}/approvals`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(approvalData),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create approval' }));
+      throw new Error(error.error || `Failed to create approval: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  list: async (organizationId: string, filters?: { status?: string }): Promise<{ approvals: Approval[] }> => {
+    const headers = await getAuthHeaders();
+    const params = new URLSearchParams();
+    if (filters?.status) {
+      params.append('status', filters.status);
+    }
+    const url = `${API_BASE}/organizations/${organizationId}/approvals${params.toString() ? `?${params.toString()}` : ''}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to fetch approvals' }));
+      throw new Error(error.error || `Failed to fetch approvals: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  getById: async (organizationId: string, approvalId: string): Promise<{ approval: Approval }> => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/organizations/${organizationId}/approvals/${approvalId}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to fetch approval' }));
+      throw new Error(error.error || `Failed to fetch approval: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  updateStatus: async (
+    organizationId: string,
+    approvalId: string,
+    status: 'pending' | 'approved' | 'changes_requested' | 'rejected',
+    changesRequested?: string,
+    changesRequestedPerAsset?: ChangesRequestedPerAsset
+  ): Promise<{ success: boolean; approval: Approval }> => {
+    const headers = await getAuthHeaders();
+    const body: Record<string, unknown> = { status };
+    if (changesRequested != null) body.changes_requested = changesRequested;
+    if (changesRequestedPerAsset != null) body.changes_requested_per_asset = changesRequestedPerAsset;
+    const response = await fetch(`${API_BASE}/organizations/${organizationId}/approvals/${approvalId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update approval' }));
+      throw new Error(error.error || `Failed to update approval: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /** Creator resubmits an approval (changes_requested/rejected -> pending). No new row created. */
+  resubmit: async (organizationId: string, approvalId: string): Promise<{ success: boolean; approval: Approval }> => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/organizations/${organizationId}/approvals/${approvalId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ resubmit: true }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to resubmit approval' }));
+      throw new Error(error.error || `Failed to resubmit approval: ${response.statusText}`);
     }
 
     return response.json();

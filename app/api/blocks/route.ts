@@ -4,7 +4,8 @@ import { knowledgeBase } from '@/lib/services/knowledgeBase';
 import { vectorStore } from '@/lib/services/vectorStore';
 import { storyCache } from '@/lib/services/storyCache';
 import { subBlockStorage } from '@/lib/services/subBlockStorage';
-import { getUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
+import { getAuthenticatedUser, getUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
+import { isDemoOrganizationId, isPublicDemoOrganizationId } from '@/lib/constants';
 
 function getRelativeTime(dateString: string): string {
     const date = new Date(dateString);
@@ -20,28 +21,45 @@ function getRelativeTime(dateString: string): string {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
 }
 
-// GET /api/blocks - Get all blocks or single block with ?id=xxx
+// GET /api/blocks - Get all blocks or single block with ?id=xxx&organizationId=xxx
 export async function GET(request: NextRequest) {
     try {
-        const userId = await getUserIdFromRequest(request);
-        const supabase = await createAuthenticatedClient();
-        console.log(`[API] GET /api/blocks - User ID: ${userId}`);
-        
-        if (!userId) {
-            console.warn('[API] Authentication failed: No user ID derived from token');
+        const auth = await getAuthenticatedUser(request);
+        if (!auth) {
+            console.warn('[API] GET /api/blocks - Authentication failed: no user');
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
         }
+        const { user, supabase: supabaseAuth } = auth;
+        const userId = user.id;
 
         const { searchParams } = new URL(request.url);
         const id = searchParams.get('id');
+        const organizationId = searchParams.get('organizationId');
+
+        if (!organizationId) {
+            return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+        }
+
+        const isPublicDemo = isPublicDemoOrganizationId(organizationId);
+        if (!isPublicDemo && !isDemoOrganizationId(organizationId)) {
+            const { data: membership } = await supabaseAuth
+                .from('organization_members')
+                .select('role')
+                .eq('organization_id', organizationId)
+                .eq('user_id', userId)
+                .single();
+            if (!membership) {
+                return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+            }
+        }
 
         await blockStorage.ensureLoaded();
 
         if (id) {
-            console.log(`[API] Fetching specific block ${id} for user ${userId}`);
-            const block = await blockStorage.getByUserId(id, userId, supabase);
+            console.log(`[API] Fetching specific block ${id} for organization ${organizationId}`);
+            const block = await blockStorage.getByOrganizationId(id, organizationId, supabaseAuth);
             if (!block) {
-                console.warn(`[API] Block ${id} not found for user ${userId}`);
+                console.warn(`[API] Block ${id} not found for organization ${organizationId}`);
                 return NextResponse.json({ error: 'Block not found' }, { status: 404 });
             }
             const files = await knowledgeBase.getDocumentsByBlock(block.id);
@@ -53,9 +71,9 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        console.log(`[API] Fetching all blocks for user ${userId}`);
-        const blocksArray = await blockStorage.getAllByUserId(userId, supabase);
-        console.log(`[API] Found ${blocksArray.length} blocks for user ${userId}`);
+        console.log(`[API] Fetching all blocks for organization ${organizationId}`);
+        const blocksArray = await blockStorage.getAllByOrganizationId(organizationId, supabaseAuth);
+        console.log(`[API] Found ${blocksArray.length} blocks for organization ${organizationId}`);
         
         // Optimization: Fetch all related data in parallel (3 DB calls total instead of N+1)
         const blockIds = blocksArray.map(b => b.id);
@@ -109,10 +127,27 @@ export async function POST(request: NextRequest) {
         }
 
         await blockStorage.ensureLoaded();
-        const { name, description } = await request.json();
+        const { name, description, organizationId } = await request.json();
 
         if (!name || typeof name !== 'string' || !name.trim()) {
             return NextResponse.json({ error: 'Name is required and must be a non-empty string' }, { status: 400 });
+        }
+
+        if (!organizationId) {
+            return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+        }
+
+        const { data: membership } = await supabase
+            .from('organization_members')
+            .select('role')
+            .eq('organization_id', organizationId)
+            .eq('user_id', userId)
+            .single();
+        if (!membership) {
+            return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+        }
+        if ((isDemoOrganizationId(organizationId) || isPublicDemoOrganizationId(organizationId)) && membership.role !== 'owner' && membership.role !== 'admin') {
+            return NextResponse.json({ error: 'Cannot create blocks in demo organization. Request access to a real organization.' }, { status: 403 });
         }
 
         const id = Date.now().toString();
@@ -121,6 +156,7 @@ export async function POST(request: NextRequest) {
         const block = {
             id,
             userId,
+            organizationId,
             name: name.trim(),
             description: (description || '').trim(),
             createdAt: now,
@@ -138,11 +174,20 @@ export async function POST(request: NextRequest) {
         });
     } catch (error: any) {
         console.error('Error creating block:', error);
-        return NextResponse.json({ error: error.message || 'Failed to create block' }, { status: 500 });
+        
+        // Provide helpful error message for migration issues
+        let errorMessage = error.message || 'Failed to create block';
+        if (errorMessage.includes('organization_id') || errorMessage.includes('schema cache')) {
+            errorMessage = errorMessage + 
+                '\n\nPlease ensure database migrations have been run. ' +
+                'See MIGRATION_GUIDE.md for instructions.';
+        }
+        
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }
 
-// PUT /api/blocks - Update block (requires id in body)
+// PUT /api/blocks - Update block (requires id and organizationId in body)
 export async function PUT(request: NextRequest) {
     try {
         const userId = await getUserIdFromRequest(request);
@@ -151,12 +196,29 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
         }
 
-        const { id, name, description } = await request.json();
+        const { id, name, description, organizationId } = await request.json();
         if (!id) {
             return NextResponse.json({ error: 'Block id is required' }, { status: 400 });
         }
 
-        const block = await blockStorage.getByUserId(id, userId, supabase);
+        if (!organizationId) {
+            return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+        }
+
+        const { data: membership } = await supabase
+            .from('organization_members')
+            .select('role')
+            .eq('organization_id', organizationId)
+            .eq('user_id', userId)
+            .single();
+        if (!membership) {
+            return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+        }
+        if ((isDemoOrganizationId(organizationId) || isPublicDemoOrganizationId(organizationId)) && membership.role !== 'owner' && membership.role !== 'admin') {
+            return NextResponse.json({ error: 'Cannot update blocks in demo organization.' }, { status: 403 });
+        }
+
+        const block = await blockStorage.getByOrganizationId(id, organizationId, supabase);
         if (!block) {
             return NextResponse.json({ error: 'Block not found' }, { status: 404 });
         }
@@ -180,7 +242,7 @@ export async function PUT(request: NextRequest) {
     }
 }
 
-// DELETE /api/blocks?id=xxx
+// DELETE /api/blocks?id=xxx&organizationId=xxx
 export async function DELETE(request: NextRequest) {
     try {
         const userId = await getUserIdFromRequest(request);
@@ -191,15 +253,34 @@ export async function DELETE(request: NextRequest) {
 
         const { searchParams } = new URL(request.url);
         const id = searchParams.get('id');
+        const organizationId = searchParams.get('organizationId');
+        
         if (!id) {
             return NextResponse.json({ error: 'Block id is required' }, { status: 400 });
         }
 
-        console.log(`[API] Deleting block ${id} for user ${userId}`);
-        const block = await blockStorage.getByUserId(id, userId, supabase);
+        if (!organizationId) {
+            return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+        }
+
+        const { data: membership } = await supabase
+            .from('organization_members')
+            .select('role')
+            .eq('organization_id', organizationId)
+            .eq('user_id', userId)
+            .single();
+        if (!membership) {
+            return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+        }
+        if ((isDemoOrganizationId(organizationId) || isPublicDemoOrganizationId(organizationId)) && membership.role !== 'owner' && membership.role !== 'admin') {
+            return NextResponse.json({ error: 'Cannot delete blocks in demo organization.' }, { status: 403 });
+        }
+
+        console.log(`[API] Deleting block ${id} for organization ${organizationId}`);
+        const block = await blockStorage.getByOrganizationId(id, organizationId, supabase);
         
         if (!block) {
-            console.warn(`[API] Block ${id} not found for user ${userId} - cannot delete`);
+            console.warn(`[API] Block ${id} not found for organization ${organizationId} - cannot delete`);
             return NextResponse.json({ error: 'Block not found' }, { status: 404 });
         }
 

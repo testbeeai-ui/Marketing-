@@ -3,6 +3,8 @@
 import { useState, useCallback, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { authService } from "@/lib/auth";
 import {
   Camera,
   TrendingUp,
@@ -50,6 +52,7 @@ import { toast } from "sonner";
 import { useDemoMode } from "@/lib/contexts/DemoModeContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PLATFORM_WATCH } from "@/lib/storyteller/platformWatch";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
 
 const SEMANTIC_BAR_COLORS = [
   "bg-emerald-500",
@@ -140,7 +143,9 @@ const MOCK_STRATEGIC_ANALYSIS: StrategicAnalysis = {
 export default function StoryTellerDashboard() {
   const router = useRouter();
   const { demoMode } = useDemoMode();
+  const { activeOrganization, isDemoMode } = useOrganization();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [showDemoRestriction, setShowDemoRestriction] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [strategicAnalysis, setStrategicAnalysis] = useState<StrategicAnalysis | null>(null);
@@ -150,10 +155,15 @@ export default function StoryTellerDashboard() {
 
   // Load recent analytics snapshots for the dashboard
   useEffect(() => {
+    if (!activeOrganization?.id) return;
+    
     const fetchSnapshots = async () => {
       try {
         setLoadingSnapshots(true);
-        const res = await fetch("/api/analytics-snapshots?limit=5");
+        const token = await authService.getSessionToken();
+        const res = await fetch(`/api/analytics-snapshots?limit=5&organizationId=${activeOrganization.id}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (!res.ok) {
           return;
         }
@@ -194,9 +204,15 @@ export default function StoryTellerDashboard() {
     try {
       for (let i = 0; i < valid.length; i++) {
         setUploadProgress({ current: i + 1, total: valid.length });
+        if (!activeOrganization?.id) {
+          toast.error("No active organization selected");
+          continue;
+        }
+
         const formData = new FormData();
         formData.append("file", valid[i]);
         formData.append("platform", "x");
+        formData.append("organizationId", activeOrganization.id);
 
         const res = await fetch("/api/analyze-screenshot", {
           method: "POST",
@@ -236,7 +252,7 @@ export default function StoryTellerDashboard() {
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [activeOrganization?.id]);
 
   const handleFileUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -263,8 +279,8 @@ export default function StoryTellerDashboard() {
   const extracted = (latestSnapshot?.extracted_data || {}) as ExtractedData;
   const metrics: Metrics = extracted.metrics || {};
 
-  const useDemoData = demoMode;
-  const hasRealData = !demoMode && latestSnapshot?.extracted_data;
+  const useDemoData = demoMode || isDemoMode;
+  const hasRealData = !useDemoData && latestSnapshot?.extracted_data;
 
   const impressions = useDemoData
     ? 798
@@ -338,7 +354,7 @@ export default function StoryTellerDashboard() {
                 </p>
               </div>
               <Button
-                onClick={() => setUploadOpen(true)}
+                onClick={() => (useDemoData ? setShowDemoRestriction(true) : setUploadOpen(true))}
                 className="bg-storyteller-primary hover:bg-storyteller-primary/90 text-white shadow-sm"
               >
                 <Camera className="w-4 h-4 mr-2" />
@@ -983,6 +999,12 @@ export default function StoryTellerDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+      <DemoRestrictionDialog
+        open={showDemoRestriction}
+        onOpenChange={setShowDemoRestriction}
+        title="Request access to upload analytics"
+        description="You're in demo mode. To upload screenshots and get AI-powered insights, request access. Share your details and we'll get you set up."
+      />
     </div>
     </TooltipProvider>
   );

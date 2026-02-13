@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Trash2, Upload, Database, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { FileText, Trash2, Upload, Database, CheckCircle2, Loader2, XCircle, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 
@@ -27,6 +27,10 @@ interface KnowledgeBaseProps {
   processingFiles?: ProcessingFile[];
   completedCount?: number;
   totalProcessing?: number;
+  /** When true, show "Request access" form instead of upload (read-only / demo users) */
+  readOnly?: boolean;
+  /** Called when user clicks to request access (e.g. open request-access dialog) */
+  onRequestAccess?: () => void;
 }
 
 const formatFileSize = (bytes?: number) => {
@@ -44,6 +48,8 @@ export const KnowledgeBase = ({
   processingFiles = [],
   completedCount = 0,
   totalProcessing = 0,
+  readOnly = false,
+  onRequestAccess,
 }: KnowledgeBaseProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [completedMessages, setCompletedMessages] = useState<string[]>([]);
@@ -69,6 +75,10 @@ export const KnowledgeBase = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    if (readOnly && onRequestAccess) {
+      onRequestAccess();
+      return;
+    }
     if (e.dataTransfer.files) {
       onFileUpload(e.dataTransfer.files);
     }
@@ -194,6 +204,20 @@ export const KnowledgeBase = ({
       {/* Upload Zone */}
       <div className="px-6 py-5">
       <motion.div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (readOnly && onRequestAccess && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onRequestAccess();
+          }
+        }}
+        onClick={() => {
+          if (readOnly && onRequestAccess) {
+            onRequestAccess();
+            return;
+          }
+        }}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -217,21 +241,28 @@ export const KnowledgeBase = ({
               )} />
             </motion.div>
             <p className="text-sm font-medium text-foreground mb-1">
-              {isDragOver ? "Drop files here" : "Upload files"}
+              {readOnly
+                ? (isDragOver ? "Drop to request access" : "Request access to upload files")
+                : (isDragOver ? "Drop files here" : "Upload files")}
             </p>
             <p className="text-xs text-muted-foreground">
-              Drag & drop or click to browse
+              {readOnly ? "Click or drop to request access" : "Drag & drop or click to browse"}
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              🔒 Processed locally • Only text extracted • No cloud upload
+              {readOnly
+                ? "Request access to upload and modify content"
+                : "🔒 Processed locally • Only text extracted • No cloud upload"}
           </p>
         </div>
-        <input
-          type="file"
-          multiple
-          onChange={(e) => e.target.files && onFileUpload(e.target.files)}
-          className="absolute inset-0 opacity-0 cursor-pointer"
-        />
+        {!readOnly && (
+          <input
+            type="file"
+            multiple
+            aria-label="Upload files to knowledge base"
+            onChange={(e) => e.target.files && onFileUpload(e.target.files)}
+            className="absolute inset-0 opacity-0 cursor-pointer"
+          />
+        )}
       </motion.div>
       </div>
 
@@ -290,6 +321,8 @@ export const KnowledgeBase = ({
               </div>
 
               <button
+                type="button"
+                aria-label={`Delete ${file.name || "file"}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onFileDelete(file.id);

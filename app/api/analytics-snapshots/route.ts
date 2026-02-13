@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
+import { isDemoOrganizationId, isPublicDemoOrganizationId } from '@/lib/constants';
 import {
   useStorytellerLocalStore,
   listByUserLocal,
@@ -27,6 +28,25 @@ export async function GET(request: NextRequest) {
     const snapshotType = (typeParam === 'post' || typeParam === 'dashboard') ? typeParam : undefined;
     const from = searchParams.get('from') || undefined;
     const to = searchParams.get('to') || undefined;
+    const organizationId = searchParams.get('organizationId');
+
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
+
+    const supabase = await createAuthenticatedClient();
+    if (!isDemoOrganizationId(organizationId) && !isPublicDemoOrganizationId(organizationId)) {
+      const { data: membership } = await supabase
+        .from('organization_members')
+        .select('role')
+        .eq('organization_id', organizationId)
+        .eq('user_id', userId)
+        .single();
+      if (!membership) {
+        return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+      }
+    }
+
     const dateRange =
       from || to
         ? { from: from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : undefined, to: to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? to : undefined }
@@ -37,8 +57,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(data);
     }
 
-    const supabase = await createAuthenticatedClient();
-    const data = await listByUserSupabase(supabase, userId, limit, platform, snapshotType, dateRange);
+    const data = await listByUserSupabase(supabase, userId, limit, platform, snapshotType, dateRange, organizationId);
     return NextResponse.json(data);
   } catch (error) {
     console.error('[analytics-snapshots] Unexpected error:', error);

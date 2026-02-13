@@ -7,6 +7,8 @@ import { StoryResults } from "./StoryResults";
 import { SubBlockDetail } from "./SubBlockDetail";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { subBlocksApi } from "@/lib/api";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
 
 interface StoryEngineProps {
   blockId: string;
@@ -23,8 +25,19 @@ const loadingMessages = [
   "Generating Drafts...",
 ];
 
+const DEMO_STORIES = {
+  professional:
+    "**Most teams never see this.**\n\nThe brands that win aren't the ones with the biggest budgets—they're the ones that stop guessing and start using what already works.\n\n• **Data-driven strategy** plus creative storytelling isn't optional anymore; it's the baseline. Teams that skip this step are leaving clarity (and results) on the table.\n• **One workflow** can change how you plan, create, and measure. The gap between 'we post and hope' and 'we know what works' is smaller than you think.\n• Your competitors are still searching for this clarity. You don't have to wait.\n\n**You're one workflow away from the kind of clarity that turns guesswork into repeatable wins.**",
+  viral:
+    "**This is what stops the scroll.**\n\nNot another ad. A **conversation**—the kind that makes people pause, react, and hit share before they've even finished reading.\n\n• That moment doesn't happen by accident. It comes from a clear voice, a real hook, and content that feels like it was written for one person (even when it reaches millions).\n• The brands that get it right don't 'just post.' They create moments: a line that gets quoted, a question that gets answered, a take that gets shared.\n• If you're not creating that moment, someone else in your space is. The good news: you can learn the pattern.\n\n**The brands that master this never go back to random posting. They build a system.**",
+  storyteller:
+    "**Your audience is waiting for this story.**\n\nNot a pitch. The **real** one—the problem you saw, the solution you built, the community you're creating.\n\n• Most brands never tell it. They lead with features and hope someone cares. The ones that lead with story get remembered.\n• People don't buy products; they buy the *why* and the *who*. Your story is the bridge between what you do and why it matters to them.\n• Every post is a chance to add one more chapter: the lesson you learned, the customer you helped, the future you're building.\n\n**The ones who tell it well don't just get likes; they get loyalty. What's your story?**",
+};
+
 export const StoryEngine = ({ blockId, linkedDocuments, subBlockId, onStoriesGenerated, onBack, showBackButton = false }: StoryEngineProps) => {
   const queryClient = useQueryClient();
+  const { isDemoMode } = useOrganization();
+  const [showDemoRestriction, setShowDemoRestriction] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingIndex, setLoadingIndex] = useState(0);
@@ -87,6 +100,10 @@ export const StoryEngine = ({ blockId, linkedDocuments, subBlockId, onStoriesGen
   }, [isLoading]);
 
   const handleGenerate = async () => {
+    if (isDemoMode) {
+      setShowDemoRestriction(true);
+      return;
+    }
     if (!prompt.trim()) return;
     setIsLoading(true);
     setLoadingIndex(0);
@@ -153,11 +170,14 @@ export const StoryEngine = ({ blockId, linkedDocuments, subBlockId, onStoriesGen
           setViewMode("input");
           setPrompt(currentSubBlock.prompt || "");
         }}
+        isDemoMode={isDemoMode}
+        onRequestAccess={() => setShowDemoRestriction(true)}
       />
     );
   }
 
   return (
+    <>
     <div className="h-full flex flex-col">
       <AnimatePresence mode="wait">
         {showResults && stories ? (
@@ -286,5 +306,12 @@ export const StoryEngine = ({ blockId, linkedDocuments, subBlockId, onStoriesGen
         )}
       </AnimatePresence>
     </div>
+    <DemoRestrictionDialog
+      open={showDemoRestriction}
+      onOpenChange={setShowDemoRestriction}
+      title="Request access to generate stories"
+      description="You're in demo mode. To generate stories from your content, request access. Share your details and we'll get you set up."
+    />
+    </>
   );
 };

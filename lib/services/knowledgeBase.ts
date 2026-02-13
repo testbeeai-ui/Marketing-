@@ -27,11 +27,23 @@ export class KnowledgeBase {
   }
 
   async addDocument(doc: Document): Promise<void> {
+    // Get organization_id from parent block
+    const { data: parentBlock, error: blockError } = await this.db
+      .from('blocks')
+      .select('organization_id')
+      .eq('id', doc.blockId)
+      .single();
+
+    if (blockError || !parentBlock) {
+      throw new Error(`Failed to find parent block ${doc.blockId}: ${blockError?.message || 'Block not found'}`);
+    }
+
     const { error } = await this.db
       .from('documents')
       .upsert({
         id: doc.id,
         block_id: doc.blockId,
+        organization_id: parentBlock.organization_id,
         file_name: doc.fileName,
         content: doc.content,
         file_size: doc.fileSize,
@@ -41,6 +53,16 @@ export class KnowledgeBase {
 
     if (error) {
       console.error('[KnowledgeBase] Failed to save document:', error);
+      if (
+        error.message?.includes('organization_id') ||
+        error.message?.includes('schema cache') ||
+        error.code === '42703'
+      ) {
+        throw new Error(
+          `Database migration not applied: The 'organization_id' column is missing from the 'documents' table. ` +
+          `Please run migration: 20250212000006_add_organization_id_to_tables.sql (see MIGRATION_GUIDE.md)`
+        );
+      }
       throw new Error(`Failed to save document: ${error.message}`);
     }
   }

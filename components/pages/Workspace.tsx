@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { useParams, useRouter } from "next/navigation";
-import { Navbar } from "@/components/layout/Navbar";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { WorkspaceTabs } from "@/components/workspace/WorkspaceTabs";
 import { SubBlockCard } from "@/components/workspace/SubBlockCard";
 import { CreateSubBlockDialog } from "@/components/workspace/CreateSubBlockDialog";
@@ -16,6 +15,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
+import { PUBLIC_DEMO_ORGANIZATION_ID } from "@/lib/constants";
 
 interface ProcessingFile {
   id: string;
@@ -26,14 +28,26 @@ interface ProcessingFile {
 
 const Workspace = () => {
   const params = useParams();
+  const searchParams = useSearchParams();
   const blockId = params?.blockId as string;
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { activeOrganization, isDemoMode, isAppAdmin } = useOrganization();
+  const [showDemoRestriction, setShowDemoRestriction] = useState(false);
+
+  const urlSubBlock = searchParams.get("sub_block");
+  const urlApprovalId = searchParams.get("approval");
+  const urlHighlight = searchParams.get("highlight");
 
   const { data: block, isLoading, isError } = useQuery({
-    queryKey: ['blocks', blockId],
-    queryFn: () => blocksApi.getById(blockId!),
-    enabled: !!blockId,
+    queryKey: ['blocks', blockId, activeOrganization?.id],
+    queryFn: () => {
+      if (!activeOrganization?.id) {
+        throw new Error('No active organization');
+      }
+      return blocksApi.getById(blockId!, activeOrganization.id);
+    },
+    enabled: !!blockId && !!activeOrganization?.id,
   });
 
   const { data: subBlocks = [], refetch: refetchSubBlocks } = useQuery({
@@ -59,6 +73,21 @@ const Workspace = () => {
       setActiveTabId(block.id);
     }
   }, [block]);
+
+  // Deep link: open sub-block and pass approval/highlight when coming from approval "Go to block"
+  useEffect(() => {
+    if (!urlSubBlock || !subBlocks.length) return;
+    const exists = subBlocks.some((sb) => sb.id === urlSubBlock);
+    if (exists) {
+      setActiveSubBlockId(urlSubBlock);
+      const selectedSubBlock = subBlocks.find((sb) => sb.id === urlSubBlock);
+      if (selectedSubBlock?.storyVariations?.length) {
+        setViewMode("detail");
+      } else {
+        setViewMode("input");
+      }
+    }
+  }, [urlSubBlock, subBlocks]);
 
   // Update view mode based on sub-blocks and selection
   useEffect(() => {
@@ -93,8 +122,12 @@ const Workspace = () => {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: ({ file, blockId, fileId }: { file: File; blockId: string; fileId: string }) =>
-      filesApi.upload(file, blockId),
+    mutationFn: ({ file, blockId, fileId }: { file: File; blockId: string; fileId: string }) => {
+      if (!activeOrganization?.id) {
+        throw new Error('No active organization');
+      }
+      return filesApi.upload(file, blockId, activeOrganization.id);
+    },
     onMutate: ({ fileId, file }) => {
       // Set status to uploading
       setProcessingFiles((prev) => [
@@ -305,9 +338,7 @@ const Workspace = () => {
       animate={{ opacity: 1 }}
       className="min-h-screen bg-background flex flex-col"
     >
-      <Navbar />
-
-      <div className="pt-16 flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col">
         <WorkspaceTabs
           tabs={tabs}
           activeTabId={activeTabId}
@@ -326,6 +357,8 @@ const Workspace = () => {
               processingFiles={processingFiles}
               completedCount={completedCount}
               totalProcessing={processingFiles.length}
+              readOnly={isDemoMode}
+              onRequestAccess={() => setShowDemoRestriction(true)}
             />
           </div>
 
@@ -345,12 +378,15 @@ const Workspace = () => {
                       </p>
                     </div>
                     <Button
-                      onClick={() => setIsCreateDialogOpen(true)}
-                      className="gradient-violet hover:opacity-90 text-white border-0"
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      New Sub-Block
-                    </Button>
+                        onClick={() => {
+                          if (isDemoMode) setShowDemoRestriction(true);
+                          else setIsCreateDialogOpen(true);
+                        }}
+                        className="gradient-violet hover:opacity-90 text-white border-0"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        New Sub-Block
+                      </Button>
                   </div>
 
                   <div className="flex-1 overflow-y-auto">
@@ -382,6 +418,7 @@ const Workspace = () => {
                             onClick={() => handleSubBlockClick(subBlock.id)}
                             onDelete={() => handleSubBlockDelete(subBlock.id)}
                             onModify={() => handleSubBlockModify(subBlock)}
+                            isDemoMode={isDemoMode}
                           />
                         ))}
                       </div>
@@ -401,6 +438,10 @@ const Workspace = () => {
                   onGenerateNew={() => {
                     setViewMode("input");
                   }}
+                  isDemoMode={isDemoMode}
+                  onRequestAccess={() => setShowDemoRestriction(true)}
+                  approvalId={urlApprovalId ?? undefined}
+                  highlight={urlHighlight ?? undefined}
                 />
               ) : (
                 // Show story input/generation
@@ -424,6 +465,12 @@ const Workspace = () => {
         </div>
       </div>
 
+      <DemoRestrictionDialog
+        open={showDemoRestriction}
+        onOpenChange={setShowDemoRestriction}
+        title="Request access to create sub-blocks"
+        description="You're in demo mode. To create sub-blocks and organize your stories, request access. Share your details and we'll get you set up."
+      />
       {/* Create Sub-Block Dialog */}
       <CreateSubBlockDialog
         isOpen={isCreateDialogOpen}

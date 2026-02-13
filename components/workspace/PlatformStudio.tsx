@@ -1,16 +1,34 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Linkedin, Twitter, Instagram, Facebook, Copy, Check, Loader2, RefreshCw, ThumbsUp, ThumbsDown, Image as ImageIcon, Download, ArrowRight, MessageSquare, Repeat2, Heart, Share, AlertCircle, Bookmark, Pencil } from "lucide-react";
+import { X, Linkedin, Twitter, Instagram, Facebook, Copy, Check, Loader2, RefreshCw, ThumbsUp, ThumbsDown, Image as ImageIcon, Download, ArrowRight, MessageSquare, Repeat2, Heart, Share, AlertCircle, Bookmark, Pencil, Send, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { contentApi, subBlocksApi, imagesApi } from "@/lib/api";
+import { contentApi, subBlocksApi, imagesApi, approvalsApi, type Approval } from "@/lib/api";
 import { authService } from "@/lib/auth";
 import { toast } from "sonner";
 import { renderMarkdown, getPlainText } from "@/lib/markdown";
 import { saveImage, getImageUrl, urlToBlob, getImagesForStory } from "@/lib/storage";
 import { LogoEditor, LogoPosition, LogoInstance } from "./LogoEditor";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { useOnboardingTour } from "@/lib/contexts/OnboardingTourContext";
+import { APP_ADMIN_EMAILS } from "@/lib/constants";
+import { getDemoImageFallbackUrl, type DemoStyle as DemoStyleType, type DemoPlatform as DemoPlatformType } from "@/lib/demoImages";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { SendApprovalDialog } from "./SendApprovalDialog";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/lib/supabase";
 export type GenerationMode = "text" | "image-first";
 
 interface PlatformStudioProps {
@@ -25,6 +43,10 @@ interface PlatformStudioProps {
   subBlockId?: string;
   blockId?: string;
   generationMode?: GenerationMode;
+  /** From URL when opening from approval "Go to block" */
+  approvalId?: string;
+  /** e.g. linkedin_text – auto-open feedback popup for this asset */
+  highlight?: string;
 }
 
 const platforms = [
@@ -64,7 +86,11 @@ const platformImageSpecs: Record<string, { width: number; height: number; label:
   facebook: { width: 1200, height: 630, label: "1200×630", ratio: "1.91:1", color: "#1877F2" }
 };
 
-export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, blockId, generationMode }: PlatformStudioProps) => {
+export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, blockId, generationMode, approvalId, highlight }: PlatformStudioProps) => {
+  const { activeOrganization, isDemoMode, isAppAdmin } = useOrganization();
+  const { step: onboardingStep, setStep: setOnboardingStep, nextStep: onboardingNextStep } = useOnboardingTour();
+  const [showDemoRestriction, setShowDemoRestriction] = useState(false);
+  const [showStep4PromptModal, setShowStep4PromptModal] = useState(false);
   const [viewMode, setViewMode] = useState<'text' | 'image'>('text'); // Toggle between text and image views
   const [activePlatform, setActivePlatform] = useState("linkedin");
   const [selectedImagePlatform, setSelectedImagePlatform] = useState<string>("linkedin");
@@ -89,6 +115,12 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   const [generatedImage, setGeneratedImage] = useState<{ url: string; prompt: string; enhancedPrompt: string } | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
+  // Approval State
+  const [showSendApprovalDialog, setShowSendApprovalDialog] = useState(false);
+  const [userRole, setUserRole] = useState<"owner" | "admin" | "member" | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [openFeedbackPopover, setOpenFeedbackPopover] = useState<string | null>(null);
+
   // Image-First Mode State
   const [platformImages, setPlatformImages] = useState<Record<string, { enhancedPrompt: string; imageUrl?: string; imageId?: string }>>({});
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
@@ -103,6 +135,122 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   const { toast: toastHook } = useToast();
 
   const isImageFirstMode = generationMode === "image-first";
+
+  // Fetch user role in organization
+  useEffect(() => {
+    if (!activeOrganization?.id) {
+      setUserRole(null);
+      return;
+    }
+
+    const fetchUserRole = async () => {
+      try {
+        const res = await fetch(`/api/organizations/${activeOrganization.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setUserRole(data.organization?.user_role || data.user_role || null);
+        }
+      } catch (error) {
+        console.error("Failed to fetch user role:", error);
+      }
+    };
+
+    fetchUserRole();
+  }, [activeOrganization?.id]);
+
+  const isAdminOrOwner = userRole === "admin" || userRole === "owner";
+
+  // Fetch approvals for current sub_block_id
+  const { data: approvalsData } = useQuery({
+    queryKey: ["approvals", activeOrganization?.id, subBlockId],
+    queryFn: async () => {
+      if (!activeOrganization?.id || !subBlockId) return { approvals: [] };
+      try {
+        const data = await approvalsApi.list(activeOrganization.id);
+        // Filter by sub_block_id
+        const filtered = data.approvals.filter(
+          (a: Approval) => a.sub_block_id === subBlockId
+        );
+        return { approvals: filtered };
+      } catch (error) {
+        console.error("Failed to fetch approvals:", error);
+        return { approvals: [] };
+      }
+    },
+    enabled: !!activeOrganization?.id && !!subBlockId && isOpen,
+  });
+
+  const approvals = approvalsData?.approvals || [];
+
+  // Current user for resubmit (creator check)
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUserId(user?.id ?? null);
+    });
+  }, []);
+
+  // Auto-open feedback popover and switch tab when opened from approval deep link with highlight
+  useEffect(() => {
+    if (!highlight || !approvals.length) return;
+    const [platformId, asset] = highlight.split("_");
+    if (!platformId || !asset) return;
+    const hasFeedback = approvals.some(
+      (a: Approval) =>
+        (a.status === "changes_requested" || a.status === "rejected") &&
+        a.changes_requested_per_asset?.[platformId]?.[asset as "text" | "image"]?.trim()
+    );
+    if (hasFeedback) {
+      setOpenFeedbackPopover(highlight);
+      if (asset === "text") {
+        setViewMode("text");
+        setActivePlatform(platformId);
+      } else {
+        setViewMode("image");
+        setSelectedImagePlatform(platformId);
+      }
+    }
+  }, [highlight, approvals]);
+
+  // Helper: get first feedback text for (platformId, asset)
+  const getFeedbackForAsset = (platformId: string, asset: "text" | "image"): string | null => {
+    for (const a of approvals) {
+      if (a.status !== "changes_requested" && a.status !== "rejected") continue;
+      const text = a.changes_requested_per_asset?.[platformId]?.[asset]?.trim();
+      if (text) return text;
+    }
+    return null;
+  };
+
+  const resubmitApproval = approvals.find(
+    (a: Approval) =>
+      (a.status === "changes_requested" || a.status === "rejected") && a.created_by === currentUserId
+  );
+
+  // Single approval status for display (needs-action first, else most recent)
+  const primaryApprovalStatus = (() => {
+    if (approvals.length === 0) return null;
+    const needsAction = approvals.find((a: Approval) => a.status === "changes_requested" || a.status === "rejected");
+    if (needsAction) return needsAction.status;
+    const sorted = [...approvals].sort((a: Approval, b: Approval) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    return sorted[0]?.status ?? null;
+  })();
+
+  const queryClient = useQueryClient();
+  const resubmitMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeOrganization?.id || !resubmitApproval) throw new Error("Cannot resubmit");
+      return approvalsApi.resubmit(activeOrganization.id, resubmitApproval.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["approvals", activeOrganization?.id, subBlockId] });
+      toast.success("Resubmitted for approval");
+    },
+    onError: (e: Error) => {
+      toast.error(e.message || "Failed to resubmit");
+    },
+  });
 
   // Track the last loaded variation to prevent unnecessary regeneration
   const [lastLoadedVariationId, setLastLoadedVariationId] = useState<string | null>(null);
@@ -206,97 +354,50 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   };
 
   useEffect(() => {
-    if (isOpen && story) {
-      // Check if this is the same variation we already loaded
-      const variationKey = `${storyId}-${story.id}`;
+    if (!isOpen || !story) return;
+    const variationKey = `${storyId}-${story.id}`;
 
-      if (lastLoadedVariationId === variationKey && Object.keys(generatedContent).length > 0) {
-        // Same variation and we have content - don't regenerate
+    if (lastLoadedVariationId === variationKey && Object.keys(generatedContent).length > 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      // 1) Try cache first — never regenerate if we already have content for this variation
+      const cachedData = await loadCachedContent();
+      if (cancelled) return;
+      const hasCache = cachedData && (Object.keys(cachedData.textContent || {}).length > 0 || Object.keys(cachedData.cachedImages || {}).length > 0);
+      if (hasCache) {
+        // loadCachedContent() already set generatedContent, platformImages, platformImagePrompts
+        setLastLoadedVariationId(variationKey);
+        setHasLoadedCache(true);
+        if (isImageFirstMode && cachedData!.cachedImages && Object.keys(cachedData!.cachedImages!).length > 0) {
+          setImageFirstPhase("images");
+        } else if (isImageFirstMode) {
+          setImageFirstPhase("prompts");
+        }
+        setImageLoadErrors({});
         return;
       }
 
-      // NEW VARIATION - Clear all previous state
+      // 2) No cache for this variation — clear once and generate (no duplicate API calls). Skip auto-generate for demo users so the restriction dialog doesn't flash; app admins always generate.
       setGeneratedContent({});
-      setPlatformImagePrompts({}); // Clear old image prompts
-      setPlatformImages({}); // Clear old images
+      setPlatformImagePrompts({});
+      setPlatformImages({});
       setGenerationProgress({});
       setLastLoadedVariationId(variationKey);
       setHasLoadedCache(false);
-
-      // Try to load cached content for THIS variation first
-      // Try to load cached content for THIS variation first
-      const initializeContent = async () => {
-        const cachedData = await loadCachedContent();
-        setHasLoadedCache(true);
-
-        if (isImageFirstMode) {
-          if (cachedData) {
-            // We have cached data! Check what we loaded
-            const hasCachedImages = !!cachedData.cachedImages;
-            const hasCachedPrompts = !!cachedData.cachedPrompts;
-            const hasTextContent = !!cachedData.textContent;
-
-            if (hasCachedImages) {
-              // We have cached images - go directly to images phase
-              console.log('[PlatformStudio] Found cached images, showing directly');
-              setImageFirstPhase("images");
-            } else if (hasCachedPrompts) {
-              // We have cached prompts but no images - go to prompts phase  
-              console.log('[PlatformStudio] Found cached prompts, showing prompts');
-              setImageFirstPhase("prompts");
-            } else if (hasTextContent) {
-              // No cached prompts - generate from text content
-              console.log('[PlatformStudio] No cached prompts, generating from text');
-              setImageFirstPhase("prompts");
-
-              // Populate prompts from cached text content
-              const platformStyles: Record<string, string> = {
-                linkedin: "Professional, clean, corporate style with business elements",
-                twitter: "Bold, eye-catching, high contrast with quick visual impact",
-                instagram: "Vibrant, visually stunning, aesthetic with rich colors",
-                facebook: "Engaging, shareable, warm and community-focused",
-              };
-
-              const prompts: Record<string, string> = {};
-              imagePlatforms.forEach(platform => {
-                const text = cachedData.textContent?.[platform];
-                if (text && text.length > 20 && !text.toLowerCase().includes("failed")) {
-                  const style = platformStyles[platform] || "";
-                  const contentSummary = text.substring(0, 150).replace(/\n/g, ' ').trim();
-                  prompts[platform] = `${style}. Illustrating: ${contentSummary}`;
-                } else {
-                  // Fallback
-                  const style = platformStyles[platform] || "";
-                  prompts[platform] = `${style}. Create an image for: ${story.title}`;
-                }
-              });
-
-              if (Object.keys(prompts).length > 0) {
-                setPlatformImagePrompts(prompts);
-              }
-            } else {
-              // No cache at all -> Start Step 1: Text Generation
-              setImageFirstPhase("text");
-              generateContent();
-            }
-          } else {
-            // No cache -> Start Step 1: Text Generation
-            setImageFirstPhase("text");
-            generateContent();
-          }
-        } else {
-          // TEXT ONLY MODE: Generate text content
-          if (!cachedData?.textContent) {
-            generateContent();
-          }
-          setImagePrompt(`A professional illustration for a story about: ${story.title}`);
-        }
-      };
-
-      initializeContent();
-    }
+      if (isImageFirstMode) {
+        setImageFirstPhase("text");
+      }
+      if (!isDemoMode || isAppAdmin) {
+        generateContent();
+      }
+    };
+    run();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, storyId, story?.id]);
+  }, [isOpen, storyId, story?.id, isDemoMode, isAppAdmin]);
 
   // Sync generated text to image prompts
   useEffect(() => {
@@ -367,19 +468,24 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
     }
   }, [isOpen, storyId]);
 
-  // Auto-generate image prompt for the CURRENT platform when switching tabs
+  // Auto-generate image prompt only when we have no prompt and no image (never in demo; never regenerate)
   useEffect(() => {
     const generatePromptForCurrentPlatform = async () => {
-      // Only generate for social platforms (not "image" tab)
+      const hasPrompt = !!platformImagePrompts[activePlatform]?.trim();
+      const hasImage = !!platformImages[activePlatform]?.imageUrl;
       if (
-        activePlatform !== "image" &&
-        imagePlatforms.includes(activePlatform) &&
-        generatedContent[activePlatform] && // Has text for this platform
-        !platformImagePrompts[activePlatform] && // No prompt yet
-        !isGeneratingPrompts
+        isDemoMode ||
+        hasPrompt ||
+        hasImage ||
+        activePlatform === "image" ||
+        !imagePlatforms.includes(activePlatform) ||
+        !generatedContent[activePlatform] ||
+        isGeneratingPrompts
       ) {
-        // Set loading state for this platform
-        setIsGeneratingPrompts(true);
+        return;
+      }
+      // Set loading state for this platform
+      setIsGeneratingPrompts(true);
 
         try {
           // Call AI to generate studio quality prompt
@@ -410,12 +516,18 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
         } finally {
           setIsGeneratingPrompts(false);
         }
-      }
     };
 
     generatePromptForCurrentPlatform();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlatform, generatedContent]);
+
+  // Onboarding step 4: show prompt explanation when in image view
+  useEffect(() => {
+    if (isDemoMode && onboardingStep === 4 && viewMode === "image") {
+      setShowStep4PromptModal(true);
+    }
+  }, [isDemoMode, onboardingStep, viewMode]);
 
   const generateAllPlatformImages = async () => {
     if (Object.keys(platformImagePrompts).length === 0 && !imagePrompt.trim()) return;
@@ -564,6 +676,13 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   };
 
   const generateContent = async () => {
+    // App admins (e.g. maildpwd@gmail.com) always allowed to generate; bypass demo check if session says so
+    const { data: { session } } = await supabase.auth.getSession();
+    const isAppAdmin = session?.user?.email != null && APP_ADMIN_EMAILS.includes(session.user.email.toLowerCase());
+    if (!isAppAdmin && isDemoMode) {
+      setShowDemoRestriction(true);
+      return;
+    }
     if (!storyId && !story) return;
 
     setIsLoading(true);
@@ -760,8 +879,9 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
     }
   };
 
-  // Save platform image to database for persistence
+  // Save platform image to database for persistence (skip in demo mode; demo sub-blocks are read-only)
   const savePlatformImageToDatabase = async (platform: string, imageUrl: string, imagePrompt: string) => {
+    if (isDemoMode) return;
     if (!subBlockId || !story?.id) {
       console.warn('[PlatformStudio] Cannot save image: missing subBlockId or story.id');
       return;
@@ -806,6 +926,10 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
 
   const handleModify = async () => {
     if (!modifyInstructions.trim() || !currentContent) return;
+    if (isDemoMode) {
+      setShowDemoRestriction(true);
+      return;
+    }
 
     // Store values before closing dialog
     const instructions = modifyInstructions;
@@ -889,6 +1013,10 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
 
   const handleModifyImage = async () => {
     if (!modifyImageInstructions.trim()) return;
+    if (isDemoMode) {
+      setShowDemoRestriction(true);
+      return;
+    }
 
     const currentImageData = platformImages[activePlatform];
     if (!currentImageData?.imageUrl) {
@@ -1112,121 +1240,173 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && story && (
-        <>
-          {/* Interactive Logo Editor */}
-          {showLogoEditor && uploadedLogo && editingImage && (
-            <LogoEditor
-              key={`${editingImage.platform}-${editingImage.url}`}
-              imageUrl={editingImage.url}
-              logoBase64={uploadedLogo.base64}
-              logoMimeType={uploadedLogo.mimeType}
-              platform={editingImage.platform}
-              onApply={handleLogoApply}
-              onCancel={() => {
-                setShowLogoEditor(false);
-                setUploadedLogo(null);
-                setEditingImage(null);
-              }}
+    <>
+      <AnimatePresence>
+        {isOpen && story && (
+          <>
+            {/* Interactive Logo Editor */}
+            {showLogoEditor && uploadedLogo && editingImage && (
+              <LogoEditor
+                key={`logo-editor-${editingImage.platform}-${editingImage.url}`}
+                imageUrl={editingImage.url}
+                logoBase64={uploadedLogo.base64}
+                logoMimeType={uploadedLogo.mimeType}
+                platform={editingImage.platform}
+                onApply={handleLogoApply}
+                onCancel={() => {
+                  setShowLogoEditor(false);
+                  setUploadedLogo(null);
+                  setEditingImage(null);
+                }}
+              />
+            )}
+
+            {/* Backdrop */}
+            <motion.div
+              key="platform-studio-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
             />
-          )}
 
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          />
-
-          {/* Right-side Drawer */}
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 bottom-0 z-50 w-full sm:w-[75vw] md:w-[60vw] lg:w-[50vw] xl:w-[45vw] max-w-[700px] bg-background/95 backdrop-blur-md border-l border-border rounded-l-2xl overflow-hidden shadow-2xl"
-          >
+            {/* Right-side Drawer */}
+            <motion.div
+              key="platform-studio-drawer"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+              className="fixed right-0 top-0 bottom-0 z-50 w-full sm:w-[75vw] md:w-[60vw] lg:w-[50vw] xl:w-[45vw] max-w-[700px] bg-background/95 backdrop-blur-md border-l border-border rounded-l-2xl overflow-hidden shadow-2xl"
+            >
             <div className="h-full flex flex-col">
-              {/* Header */}
-              <div className="p-6 border-b border-border">
-                <div className="flex items-center justify-between mb-6">
+              {/* Header - Clear hierarchy and labeled actions */}
+              <div className="p-4 sm:p-6 border-b border-border space-y-4">
+                {/* Row 1: Title + Text/Image mode */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-semibold">Platform Studio</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Optimize for your audience
-                    </p>
-                    {story && (
-                      <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-primary/10 rounded-md text-xs font-medium text-primary">
-                        <span>Using:</span>
-                        <span className="font-semibold">{story.title}</span>
-                      </div>
-                    )}
+                    <h2 className="text-lg sm:text-xl font-semibold tracking-tight">Platform Studio</h2>
+                    <p className="text-sm text-muted-foreground mt-0.5">Optimize for your audience</p>
                   </div>
-
-                  {/* Image/Text Toggle */}
-                  <div className="flex items-center gap-1 p-1.5 bg-secondary/50 rounded-xl">
+                  <div className="flex items-center gap-1 p-1 bg-secondary/50 rounded-lg w-fit">
                     <button
                       onClick={() => setViewMode('text')}
                       className={cn(
-                        "flex items-center gap-2 px-6 py-2.5 rounded-lg transition-all font-semibold text-sm",
+                        "flex items-center gap-2 px-4 sm:px-5 py-2 rounded-md transition-all font-medium text-sm",
                         viewMode === 'text'
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                       )}
                     >
-                      <Copy className="w-4 h-4" />
+                      <Copy className="w-4 h-4 shrink-0" />
                       Text
                     </button>
                     <button
                       onClick={() => setViewMode('image')}
                       className={cn(
-                        "flex items-center gap-2 px-6 py-2.5 rounded-lg transition-all font-semibold text-sm",
+                        "flex items-center gap-2 px-4 sm:px-5 py-2 rounded-md transition-all font-medium text-sm",
                         viewMode === 'image'
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                       )}
+                      {...(isDemoMode && onboardingStep === 3 ? { "data-onboarding-step": "3" } : {})}
                     >
-                      <ImageIcon className="w-4 h-4" />
+                      <ImageIcon className="w-4 h-4 shrink-0" />
                       Image
                     </button>
                   </div>
+                </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
+                {/* Row 2: Variation + Single approval status + Actions */}
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  {story && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/10 text-xs font-medium text-primary">
+                      Using: <span className="font-semibold">{story.title}</span>
+                    </span>
+                  )}
+                  {/* One clear approval status */}
+                  {primaryApprovalStatus && (() => {
+                    const statusConfig: Record<string, { icon: typeof Clock; label: string; className: string }> = {
+                      pending: { icon: Clock, label: "Pending review", className: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20" },
+                      approved: { icon: CheckCircle2, label: "Approved", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" },
+                      changes_requested: { icon: AlertTriangle, label: "Changes requested", className: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20" },
+                      rejected: { icon: X, label: "Rejected", className: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20" },
+                    };
+                    const config = statusConfig[primaryApprovalStatus] || statusConfig.pending;
+                    const Icon = config.icon;
+                    return (
+                      <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium", config.className)}>
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        {config.label}
+                      </span>
+                    );
+                  })()}
+                  <div className="flex-1 min-w-0" />
+                  {/* Labeled action buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {resubmitApproval && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => resubmitMutation.mutate()}
+                        disabled={resubmitMutation.isPending}
+                        className="h-9 border-orange-500/50 text-orange-600 hover:bg-orange-500/10 hover:text-orange-700 dark:text-orange-400"
+                      >
+                        {resubmitMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+                        Resubmit
+                      </Button>
+                    )}
+                    {(isAdminOrOwner || isDemoMode) && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (isDemoMode && !isAdminOrOwner) {
+                            setShowDemoRestriction(true);
+                            return;
+                          }
+                          const hasContent = Object.keys(generatedContent).length > 0 || Object.keys(platformImages).length > 0;
+                          if (!hasContent) {
+                            toast.error("Generate content first, then send for approval.");
+                            return;
+                          }
+                          setShowSendApprovalDialog(true);
+                        }}
+                        className="h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                        {...(isDemoMode && onboardingStep === 5 ? { "data-onboarding-step": "5" } : {})}
+                      >
+                        <Send className="w-4 h-4 mr-1.5" />
+                        Send for approval
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={async () => {
-                        // Force regenerate content
+                        if (isDemoMode) {
+                          setShowDemoRestriction(true);
+                          return;
+                        }
                         setGeneratedContent({});
                         setLastLoadedVariationId(null);
                         if (viewMode === 'image') {
-                          // Regenerate image prompts via API
                           setIsGeneratingPrompts(true);
                           toast.info("Regenerating image prompts...");
-
                           const storyContent = story?.content || story?.title || "professional marketing content";
                           const generatedCaption = generatedContent[selectedImagePlatform] || storyContent;
-
                           try {
-                            // Generate prompt for currently selected platform using AI
                             const promptResult = await imagesApi.generatePrompt(generatedCaption, selectedImagePlatform);
-
                             if (promptResult.prompt) {
-                              setPlatformImagePrompts(prev => ({
-                                ...prev,
-                                [selectedImagePlatform]: promptResult.prompt
-                              }));
+                              setPlatformImagePrompts(prev => ({ ...prev, [selectedImagePlatform]: promptResult.prompt }));
                               toast.success(`Image prompt regenerated for ${selectedImagePlatform}!`);
                             }
-                          } catch (error) {
-                            console.error("Failed to regenerate image prompt:", error);
+                          } catch (err) {
+                            console.error("Failed to regenerate image prompt:", err);
                             toast.error("Failed to regenerate image prompt");
                           } finally {
                             setIsGeneratingPrompts(false);
                           }
                         } else {
-                          // Clear image state when regenerating text
                           setPlatformImagePrompts({});
                           setPlatformImages({});
                           generateContent();
@@ -1234,20 +1414,15 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                         }
                       }}
                       disabled={isLoading || isGeneratingPrompts}
-                      className="w-10 h-10 rounded-lg bg-secondary hover:bg-secondary/80 flex items-center justify-center transition-colors disabled:opacity-50"
-                      title="Regenerate Content"
-                      aria-label="Regenerate Content"
+                      className="h-9"
                     >
-                      <RefreshCw className={cn("w-5 h-5", (isLoading || isGeneratingPrompts) && "animate-spin")} />
-                    </button>
-                    <button
-                      onClick={onClose}
-                      className="w-10 h-10 rounded-lg bg-secondary hover:bg-secondary/80 flex items-center justify-center transition-colors"
-                      title="Close Platform Studio"
-                      aria-label="Close Platform Studio"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
+                      {(isLoading || isGeneratingPrompts) ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+                      Regenerate
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={onClose} className="h-9 text-muted-foreground hover:text-foreground">
+                      <X className="w-4 h-4 sm:mr-1.5" />
+                      <span className="hidden sm:inline">Close</span>
+                    </Button>
                   </div>
                 </div>
 
@@ -1334,6 +1509,31 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                           </div>
                         </div>
                       )}
+                      {/* Per-asset feedback (exclamation + popover) for current platform text */}
+                      {getFeedbackForAsset(activePlatform, "text") && (
+                        <div className="flex items-center gap-2 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                          <Popover
+                            open={openFeedbackPopover === `${activePlatform}_text`}
+                            onOpenChange={(open) => setOpenFeedbackPopover(open ? `${activePlatform}_text` : null)}
+                          >
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-orange-500 hover:text-orange-600 shrink-0">
+                                <AlertTriangle className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="max-w-sm" align="start">
+                              <p className="text-sm font-medium text-orange-700 dark:text-orange-400 mb-1">
+                                Changes for {platforms.find((p) => p.id === activePlatform)?.name} – Text
+                              </p>
+                              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                                {getFeedbackForAsset(activePlatform, "text")}
+                              </p>
+                            </PopoverContent>
+                          </Popover>
+                          <span className="text-sm text-orange-700 dark:text-orange-400">Changes requested for this text</span>
+                        </div>
+                      )}
+
                       {/* Generated Text Display */}
                       <div className="prose prose-sm dark:prose-invert max-w-none">
                         {activePlatform === 'twitter' ? (
@@ -1359,7 +1559,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                               {/* Twitter Content */}
                               <div className="p-4">
                                 {(() => {
-                                  const content = generatedContent[activePlatform] || '';
+                                  const content = currentContent;
                                   const isLong = content.length > 280;
                                   const displayContent = (!twitterExpanded && isLong)
                                     ? content.substring(0, 280) + '...'
@@ -1432,7 +1632,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                               {/* LinkedIn Content */}
                               <div className="p-4">
                                 {(() => {
-                                  const content = generatedContent[activePlatform] || '';
+                                  const content = currentContent;
                                   const isLong = content.length > 210;
                                   const displayContent = (!linkedinExpanded && isLong)
                                     ? content.substring(0, 210) + '...'
@@ -1447,6 +1647,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                                         <button
                                           onClick={() => setLinkedinExpanded(!linkedinExpanded)}
                                           className="text-[#0A66C2] hover:underline text-sm font-medium mt-1"
+                                          {...(isDemoMode && onboardingStep === 2 ? { "data-onboarding-step": "2" } : {})}
                                         >
                                           {linkedinExpanded ? '...show less' : '...see more'}
                                         </button>
@@ -1494,7 +1695,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                                   <span className="font-semibold text-sm">your_handle</span>
                                 </div>
                                 {(() => {
-                                  const content = generatedContent[activePlatform] || '';
+                                  const content = currentContent;
                                   const isLong = content.length > 125;
                                   const displayContent = (!instagramExpanded && isLong)
                                     ? content.substring(0, 125)
@@ -1557,7 +1758,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                               <div className="px-4 pb-4">
                                 <div
                                   className="prose prose-sm dark:prose-invert max-w-none"
-                                  dangerouslySetInnerHTML={{ __html: renderMarkdown(generatedContent[activePlatform]) }}
+                                  dangerouslySetInnerHTML={{ __html: renderMarkdown(currentContent) }}
                                 />
                               </div>
                               {/* Facebook Actions */}
@@ -1578,7 +1779,7 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                           // Fallback Generic View
                           <div
                             className="p-4 rounded-lg bg-background border border-border min-h-[200px] prose prose-sm dark:prose-invert max-w-none"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdown(generatedContent[activePlatform]) }}
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(currentContent) }}
                           />
                         )}
                       </div>
@@ -1672,6 +1873,31 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                         Select a platform and generate its image
                       </p>
                     </div>
+
+                    {/* Per-asset feedback for current platform image */}
+                    {getFeedbackForAsset(selectedImagePlatform, "image") && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                        <Popover
+                          open={openFeedbackPopover === `${selectedImagePlatform}_image`}
+                          onOpenChange={(open) => setOpenFeedbackPopover(open ? `${selectedImagePlatform}_image` : null)}
+                        >
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-orange-500 hover:text-orange-600 shrink-0">
+                              <AlertTriangle className="h-4 w-4" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="max-w-sm" align="start">
+                            <p className="text-sm font-medium text-orange-700 dark:text-orange-400 mb-1">
+                              Changes for {platforms.find((p) => p.id === selectedImagePlatform)?.name} – Image
+                            </p>
+                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                              {getFeedbackForAsset(selectedImagePlatform, "image")}
+                            </p>
+                          </PopoverContent>
+                        </Popover>
+                        <span className="text-sm text-orange-700 dark:text-orange-400">Changes requested for this image</span>
+                      </div>
+                    )}
 
                     {/* Selected Platform Content */}
                     {(() => {
@@ -1815,8 +2041,8 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                                   {/* Image */}
                                   {/* Image with Error Handling */}
                                   <div style={{ aspectRatio: `${aspectRatio}` }} className="bg-gray-100 dark:bg-gray-800 flex items-center justify-center relative bg-pattern">
-                                    {/* Fallback Error State */}
-                                    {imageLoadErrors[currentPlatform] ? (
+                                    {/* Fallback Error State (skip in demo: we use placeholder image instead) */}
+                                    {!isDemoMode && imageLoadErrors[currentPlatform] ? (
                                       <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground p-4 text-center animate-in fade-in">
                                         <AlertCircle className="w-8 h-8 mb-2 text-destructive" />
                                         <p className="text-sm font-medium">Failed to load image</p>
@@ -1831,15 +2057,24 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                                         </p>
                                       </div>
                                     ) : (
-                                      /* Actual Image */
+                                      /* Actual Image (demo: swap to placeholder on error) */
                                       platformImages[currentPlatform].imageUrl ? (
                                         <img
                                           src={platformImages[currentPlatform].imageUrl}
                                           alt={`${currentPlatform} generated content`}
                                           className="w-full h-full object-cover"
-                                          onError={(e) => {
-                                            console.error(`Image failed to load: ${platformImages[currentPlatform].imageUrl}`);
-                                            setImageLoadErrors(prev => ({ ...prev, [currentPlatform]: true }));
+                                          onError={() => {
+                                            if (isDemoMode && story) {
+                                              setPlatformImages((prev) => ({
+                                                ...prev,
+                                                [currentPlatform]: {
+                                                  ...prev[currentPlatform],
+                                                  imageUrl: getDemoImageFallbackUrl(story.id as DemoStyleType, currentPlatform as DemoPlatformType),
+                                                },
+                                              }));
+                                            } else {
+                                              setImageLoadErrors((prev) => ({ ...prev, [currentPlatform]: true }));
+                                            }
                                           }}
                                         />
                                       ) : (
@@ -1899,6 +2134,10 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
                             {/* Generate/Regenerate Button */}
                             <Button
                               onClick={async () => {
+                                if (isDemoMode) {
+                                  setShowDemoRestriction(true);
+                                  return;
+                                }
                                 const prompt = platformImagePrompts[currentPlatform];
                                 if (!prompt?.trim()) {
                                   toast.error("Please enter an image prompt first");
@@ -2380,9 +2619,77 @@ export const PlatformStudio = ({ isOpen, onClose, story, storyId, subBlockId, bl
               </motion.div>
             </motion.div>
           )}
-        </>
-      )
-      }
-    </AnimatePresence >
+          </>
+        )}
+      </AnimatePresence>
+      
+      {/* Send Approval Dialog - Outside AnimatePresence to avoid key conflicts */}
+      <SendApprovalDialog
+        open={showSendApprovalDialog}
+        onClose={() => setShowSendApprovalDialog(false)}
+        subBlockId={subBlockId ?? ""}
+        storyId={storyId}
+        platformContents={(() => {
+          // Build platform contents from generatedContent and platformImages
+          const contents: Record<string, { text?: string; imageUrl?: string; imagePrompt?: string }> = {};
+          
+          // Add text content
+          Object.entries(generatedContent).forEach(([platform, text]) => {
+            if (!contents[platform]) contents[platform] = {};
+            contents[platform].text = text;
+          });
+          
+          // Add image content
+          Object.entries(platformImages).forEach(([platform, imageData]) => {
+            if (!contents[platform]) contents[platform] = {};
+            if (imageData.imageUrl) {
+              contents[platform].imageUrl = imageData.imageUrl;
+            }
+            if (imageData.enhancedPrompt) {
+              contents[platform].imagePrompt = imageData.enhancedPrompt;
+            }
+          });
+          
+          return contents;
+        })()}
+      />
+      <DemoRestrictionDialog
+        open={showDemoRestriction}
+        onOpenChange={setShowDemoRestriction}
+        title="Request access to generate content"
+        description="You're in demo mode. To generate and adapt content for each platform, request access. Share your details and we'll get you set up."
+      />
+
+      {/* Onboarding step 4: prompt explanation (no form here – form comes after OK) */}
+      <Dialog
+        open={showStep4PromptModal}
+        onOpenChange={(open) => {
+          setShowStep4PromptModal(open);
+          if (!open) setOnboardingStep(5);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg">No need to write a novel!</DialogTitle>
+            <DialogDescription asChild>
+              <p className="text-sm text-muted-foreground mt-1">
+                This prompt is generated from your documented data and your style. The system understands your content and creates the prompt for you — so you can focus on creating, not typing.
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button
+              onClick={() => {
+                setShowStep4PromptModal(false);
+                setOnboardingStep(5);
+                setShowDemoRestriction(true);
+              }}
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

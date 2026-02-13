@@ -10,9 +10,10 @@ import { normalizeExtractedData } from '@/lib/storyteller/analyticsSchema';
 
 const CMO_SYSTEM_INSTRUCTION = `You are a CMO Data Analyst. First determine: Is this screenshot an ANALYTICS DASHBOARD (charts, KPIs, multiple metrics) or a SINGLE POST (one tweet/post with engagement icons like likes, reposts, views)?
 
-Output JSON based on type:
+Output JSON based on type. Use snake_case for all metric keys. ONLY use values clearly visible; set missing fields to null.
 
-**If ANALYTICS DASHBOARD**, use this structure:
+**If ANALYTICS DASHBOARD**, use this structure. In "metrics" include ANY of the following that are visible (extract all that apply):
+
 {
   "snapshot_type": "dashboard",
   "platform": "linkedin" | "x" | "instagram" | "facebook" | null,
@@ -28,7 +29,78 @@ Output JSON based on type:
     "replies": number | null,
     "likes": number | null,
     "reposts": number | null,
-    "bookmarks": number | null
+    "bookmarks": number | null,
+    "reach": number | null,
+    "page_likes": number | null,
+    "reactions": number | null,
+    "comments": number | null,
+    "post_clicks": number | null,
+    "published_content": number | null,
+    "facebook_followers": number | null,
+    "follows": number | null,
+    "content_interactions": number | null,
+    "typically_followers": number | null,
+    "typically_follows": number | null,
+    "typically_interactions": number | null,
+    "views": number | null,
+    "viewers": number | null,
+    "link_clicks": number | null,
+    "reach_goal_current": number | null,
+    "reach_goal_target": number | null,
+    "returning_viewers": number | null,
+    "engaged_followers": number | null,
+    "messaging_contacts": number | null,
+    "unfollows": number | null,
+    "net_follows": number | null,
+    "followers_lifetime": number | null,
+    "estimated_audience_min": number | null,
+    "estimated_audience_max": number | null,
+    "daily_response_rate": number | null,
+    "daily_response_time": number | null,
+    "conversations_started": number | null,
+    "total_messaging_contacts": number | null,
+    "new_messaging_contacts": number | null,
+    "returning_messaging_contacts": number | null,
+    "messaging_conversations_started": number | null,
+    "total_contacts": number | null,
+    "new_contacts_organic": number | null,
+    "new_contacts_paid": number | null,
+    "returning_contacts_organic": number | null,
+    "returning_contacts_paid": number | null,
+    "views_3s": number | null,
+    "views_1m": number | null,
+    "watch_time_s": number | null,
+    "views_organic": number | null,
+    "views_ads": number | null,
+    "approximate_earnings": number | null,
+    "earnings_change_pct": number | null,
+    "tasks_completed": number | null,
+    "tasks_total": number | null,
+    "instagram_posts_published": number | null,
+    "instagram_views": number | null,
+    "facebook_posts_progress": number | null,
+    "first_ad_progress": number | null,
+    "instagram_posts_progress": number | null,
+    "views_followers_pct": number | null,
+    "views_non_followers_pct": number | null,
+    "posts_pct": number | null,
+    "reels_pct": number | null,
+    "total_interactions": number | null,
+    "interactions_followers_pct": number | null,
+    "interactions_non_followers_pct": number | null,
+    "accounts_engaged": number | null,
+    "posts_interactions_pct": number | null,
+    "reels_interactions_pct": number | null,
+    "profile_activity": number | null,
+    "post_impressions": number | null,
+    "post_impressions_change_7d": number | null,
+    "followers_change_7d": number | null,
+    "profile_viewers_90d": number | null,
+    "search_appearances_week": number | null,
+    "weekly_actions_done": number | null,
+    "weekly_actions_goal": number | null,
+    "posts_this_week": number | null,
+    "comments_this_week": number | null
   },
   "time_series": [{ "period": string, "value": number }] | null,
   "period_start": "YYYY-MM-DD" | null,
@@ -41,10 +113,19 @@ Output JSON based on type:
     "actionable_advice": string | null,
     "resonance_label": string | null
   },
-  "post": null
+  "post": null,
+  "sections": null,
+  "recent_content": null,
+  "top_content_by_views": null,
+  "top_content_by_interactions": null
 }
 
-**If SINGLE POST** (one tweet/X post with view count, likes, reposts, replies), use:
+Optional: If the dashboard shows distinct sections (e.g. Benchmarking, Audience, Messaging), you may set "sections" to an object like { "benchmarking": { "published_content": 2, "facebook_followers": 0 }, "audience": { "follows": 0, "followers_lifetime": 0 }, "messaging": { "conversations_started": 0, "total_messaging_contacts": 0 }, "content_overview": { "views": 0, "views_organic": 0 }, "earnings": { "approximate_earnings": 0 }, "results": { "views": 0, "link_clicks": 0 } }. Use null for sections not visible.
+Optional: If "Recent content" or "Top content" is visible, set "recent_content" or "top_content_by_views" or "top_content_by_interactions" to an array of items: [{ "content_preview": string, "post_date": string, "views": number, "likes": number, "shares": number }]. Use "shares" for referral/share icon value. Omit or null if not visible.
+
+REFERRALS: Extract any metric labeled "referrals", "shares", "link clicks", "new contacts", "messaging conversations started", "search appearances" and map to: shares, link_clicks, new_messaging_contacts, messaging_conversations_started, search_appearances_week so they can be highlighted.
+
+**If SINGLE POST** (one tweet/post with view count, likes, reposts, replies), use:
 {
   "snapshot_type": "post",
   "platform": "x" | "linkedin" | "instagram" | "facebook" | null,
@@ -65,12 +146,17 @@ Output JSON based on type:
     "replies": number | null,
     "post_date": string | null,
     "content_preview": string | null,
-    "format": string | null
-  }
+    "format": string | null,
+    "shares": number | null
+  },
+  "sections": null,
+  "recent_content": null,
+  "top_content_by_views": null,
+  "top_content_by_interactions": null
 }
 
-For DASHBOARD: period_start/period_end = date range of the chart (e.g. first and last date on x-axis). Use YYYY-MM-DD.
-For SINGLE POST: post_date = when the post was published. Use YYYY-MM-DD if inferrable, else "Jan 21" format. Extract views (bar chart icon), likes, reposts, replies from engagement row. Content_preview = first ~80 chars of post text. Format = "image" | "video" | "text" | "carousel" if detectable.
+For DASHBOARD: period_start/period_end = date range of the chart. Use YYYY-MM-DD.
+For SINGLE POST: post_date = when the post was published. Use YYYY-MM-DD if inferrable, else "Jan 21". Extract views, likes, reposts, replies, shares from engagement row. Content_preview = first ~80 chars. Format = "image" | "video" | "text" | "carousel" if detectable.
 Rules:
 - ONLY use values clearly visible. Set missing fields to null.
 - snapshot_type MUST be "dashboard" or "post" based on image content.
@@ -157,9 +243,26 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const platform = (formData.get('platform') as string) || 'unknown';
+    const organizationId = formData.get('organizationId') as string | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    }
+
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
+
+    // Verify user is member of the organization
+    const { data: membership } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('organization_id', organizationId)
+      .eq('user_id', userId)
+      .single();
+
+    if (!membership) {
+      return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
     }
 
     if (file.size > MAX_FILE_SIZE) {
@@ -334,7 +437,8 @@ export async function POST(request: NextRequest) {
           normalizedPlatform,
           storagePath,
           normalizedData,
-          aiInsights
+          aiInsights,
+          organizationId
         );
       } catch (insertError) {
         console.error('[analyze-screenshot] Insert failed:', insertError);

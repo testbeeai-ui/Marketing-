@@ -7,6 +7,7 @@ import { storiesApi, subBlocksApi } from "@/lib/api";
 import { authService } from "@/lib/auth";
 import { toast } from "sonner";
 import { renderMarkdown } from "@/lib/markdown";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
 
 interface StoryResultsProps {
   prompt: string;
@@ -49,6 +50,7 @@ const storyConfig = [
 ];
 
 export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, onBack }: StoryResultsProps) => {
+  const { isDemoMode } = useOrganization();
   const [selectedStory, setSelectedStory] = useState<{
     id: string;
     title: string;
@@ -59,11 +61,6 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
   const [processingFeedback, setProcessingFeedback] = useState<Set<string>>(new Set());
 
   const handleLike = async (variationId: string, content: string, styleType: 'professional' | 'viral' | 'storyteller') => {
-    if (!authService.isAuthenticated()) {
-      toast.info('Please login to provide feedback');
-      return;
-    }
-
     const key = `${storyId || 'temp'}-${variationId}`;
     if (processingFeedback.has(key)) return;
 
@@ -75,33 +72,31 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
       return next;
     });
 
+    if (isDemoMode) {
+      toast.success('Thanks! In a real account, this feedback improves future stories.');
+      setProcessingFeedback(prev => { const n = new Set(prev); n.delete(key); return n; });
+      return;
+    }
+    if (!authService.isAuthenticated()) {
+      toast.info('Please login to provide feedback');
+      setLikedStories(prev => { const n = new Set(prev); n.delete(key); return n; });
+      setProcessingFeedback(prev => { const n = new Set(prev); n.delete(key); return n; });
+      return;
+    }
+
     try {
-      // Use storyId if available, otherwise use variationId as fallback
       const idToUse = storyId || variationId;
       await storiesApi.like(idToUse, content, styleType);
       toast.success('Thanks for your feedback! We\'ll use this to improve future stories.');
     } catch (error: any) {
       toast.error(error.message || 'Failed to save feedback');
-      setLikedStories(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
+      setLikedStories(prev => { const n = new Set(prev); n.delete(key); return n; });
     } finally {
-      setProcessingFeedback(prev => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
+      setProcessingFeedback(prev => { const n = new Set(prev); n.delete(key); return n; });
     }
   };
 
   const handleDislike = async (variationId: string, content: string, styleType: 'professional' | 'viral' | 'storyteller') => {
-    if (!authService.isAuthenticated()) {
-      toast.info('Please login to provide feedback');
-      return;
-    }
-
     const key = `${storyId || 'temp'}-${variationId}`;
     if (processingFeedback.has(key)) return;
 
@@ -112,6 +107,18 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
       next.delete(key);
       return next;
     });
+
+    if (isDemoMode) {
+      toast.success('Noted. In a real account, this feedback improves future stories.');
+      setProcessingFeedback(prev => { const n = new Set(prev); n.delete(key); return n; });
+      return;
+    }
+    if (!authService.isAuthenticated()) {
+      toast.info('Please login to provide feedback');
+      setDislikedStories(prev => { const n = new Set(prev); n.delete(key); return n; });
+      setProcessingFeedback(prev => { const n = new Set(prev); n.delete(key); return n; });
+      return;
+    }
 
     try {
       const idToUse = storyId || variationId;
@@ -152,7 +159,9 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div>
-            <h2 className="text-xl font-semibold">Your Stories</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold">Your Stories</h2>
+            </div>
             <p className="text-sm text-muted-foreground">Choose your narrative style</p>
           </div>
         </div>
@@ -180,11 +189,8 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
                 {/* Card Content */}
                 <div className="flex-1 p-5 overflow-y-auto">
                   <div 
-                    className="text-sm text-foreground/90 leading-relaxed prose prose-sm max-w-none dark:prose-invert"
+                    className="text-sm text-foreground/90 leading-relaxed prose prose-sm max-w-none dark:prose-invert break-words"
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-                    style={{
-                      wordBreak: 'break-word',
-                    }}
                   />
                 </div>
 
@@ -225,18 +231,15 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
                   {/* Format Button */}
                   <Button
                     onClick={async () => {
-                      // Save selected variation to sub-block if subBlockId is provided
-                      if (subBlockId) {
+                      if (subBlockId && !isDemoMode) {
                         try {
                           await subBlocksApi.update(subBlockId, {
                             selectedVariationId: config.id,
                           });
                         } catch (error) {
                           console.error("Failed to save selected variation:", error);
-                          // Continue anyway, don't block user action
                         }
                       }
-                      // Automatically open platform studio
                       setSelectedStory({ id: config.id, title: config.title, content });
                     }}
                     className="w-full gradient-primary hover:opacity-90 text-white border-0"
@@ -251,12 +254,14 @@ export const StoryResults = ({ prompt, stories, storyId, subBlockId, blockId, on
       </motion.div>
 
       <PlatformStudio
+        key={selectedStory ? `platform-studio-${selectedStory.id}` : "platform-studio-closed"}
         isOpen={!!selectedStory}
         onClose={() => setSelectedStory(null)}
         story={selectedStory}
         storyId={storyId}
         subBlockId={subBlockId}
         blockId={blockId}
+        generationMode="image-first"
       />
     </>
   );

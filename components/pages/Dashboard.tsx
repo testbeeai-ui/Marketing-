@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { Navbar } from "@/components/layout/Navbar";
 import { BlockCard, CreateBlockCard } from "@/components/dashboard/BlockCard";
 import { BlockSkeleton } from "@/components/dashboard/BlockSkeleton";
 import { CreateBlockDialog } from "@/components/dashboard/CreateBlockDialog";
@@ -24,11 +23,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
 
 const Dashboard = () => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { activeOrganization, isDemoMode } = useOrganization();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [showDemoRestriction, setShowDemoRestriction] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
@@ -82,16 +85,26 @@ const Dashboard = () => {
   }, []);
 
   const { data: blocks = [], isLoading, error: fetchError } = useQuery({
-    queryKey: ['blocks'],
-    queryFn: blocksApi.getAll,
+    queryKey: ['blocks', activeOrganization?.id],
+    queryFn: () => {
+      if (!activeOrganization?.id) {
+        throw new Error('No active organization');
+      }
+      return blocksApi.getAll(activeOrganization.id);
+    },
+    enabled: !!activeOrganization?.id,
     retry: 2,
   });
 
   const createMutation = useMutation({
-    mutationFn: ({ name, description }: { name: string; description: string }) =>
-      blocksApi.create(name, description),
+    mutationFn: ({ name, description }: { name: string; description: string }) => {
+      if (!activeOrganization?.id) {
+        throw new Error('No active organization');
+      }
+      return blocksApi.create(name, description, activeOrganization.id);
+    },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['blocks'] });
+      queryClient.invalidateQueries({ queryKey: ['blocks', activeOrganization?.id] });
       setIsDialogOpen(false);
       toast.success('Block created successfully!', {
         description: `"${data.name}" is ready to use.`,
@@ -111,10 +124,14 @@ const Dashboard = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, name, description }: { id: string; name: string; description: string }) =>
-      blocksApi.update(id, name, description),
+    mutationFn: ({ id, name, description }: { id: string; name: string; description: string }) => {
+      if (!activeOrganization?.id) {
+        throw new Error('No active organization');
+      }
+      return blocksApi.update(id, name, description, activeOrganization.id);
+    },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['blocks'] });
+      queryClient.invalidateQueries({ queryKey: ['blocks', activeOrganization?.id] });
       setIsEditDialogOpen(false);
       setSelectedBlock(null);
       toast.success('Block updated successfully!', {
@@ -132,9 +149,14 @@ const Dashboard = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => blocksApi.delete(id),
+    mutationFn: (id: string) => {
+      if (!activeOrganization?.id) {
+        throw new Error('No active organization');
+      }
+      return blocksApi.delete(id, activeOrganization.id);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['blocks'] });
+      queryClient.invalidateQueries({ queryKey: ['blocks', activeOrganization?.id] });
       setIsDeleteDialogOpen(false);
       setSelectedBlock(null);
       toast.success('Block deleted successfully!', {
@@ -201,52 +223,40 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
-
-      <main className="pt-24 pb-12 px-6">
-        <div className="max-w-6xl mx-auto">
+      <main className="pt-12 pb-16 px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
           {/* Cache Cleanup Banner */}
           <CacheCleanupBanner />
-
-          {/* Top Navigation: Blocks vs Analytics */}
-          <div className="mb-6 flex items-center gap-3">
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-full text-sm font-medium bg-primary text-primary-foreground shadow-sm"
-            >
-              Blocks
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push('/storyteller')}
-              className="px-3 py-1.5 rounded-full text-sm font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              Analytics
-            </button>
-          </div>
 
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-10"
+            className="mb-16"
           >
-            <h1 className="text-3xl font-bold text-foreground mb-2">
-              Welcome back, <span className="text-gradient-blue">{userName || "User"}</span>
-            </h1>
-            <p className="text-lg text-muted-foreground">
-              Select a Context Block to continue your work
-            </p>
+            <div className="space-y-2">
+              <h1 className="text-4xl lg:text-5xl font-bold text-foreground">
+                Welcome back, <span className="text-gradient-blue">{userName || "User"}</span>
+              </h1>
+              <p className="text-lg lg:text-xl text-muted-foreground">
+                Select a Context Block to continue your work
+              </p>
+            </div>
           </motion.div>
 
-          {/* Grid */}
+          {/* Grid with improved spacing and visual balance */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8"
           >
-            <CreateBlockCard onClick={() => setIsDialogOpen(true)} />
+            <CreateBlockCard
+              onClick={() => {
+                if (isDemoMode) setShowDemoRestriction(true);
+                else setIsDialogOpen(true);
+              }}
+            />
             {isLoading ? (
               // Show skeletons while loading
               Array.from({ length: 3 }).map((_, i) => (
@@ -260,9 +270,16 @@ const Dashboard = () => {
               blocks.map((block, index) => (
                 <motion.div
                   key={block.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + index * 0.1 }}
+                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ 
+                    delay: 0.15 + index * 0.08,
+                    type: "spring",
+                    stiffness: 100,
+                    damping: 15
+                  }}
+                  whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                  className="h-full"
                 >
                   <BlockCard
                     name={block.name}
@@ -282,6 +299,10 @@ const Dashboard = () => {
         </div>
       </main>
 
+      <DemoRestrictionDialog
+        open={showDemoRestriction}
+        onOpenChange={setShowDemoRestriction}
+      />
       <CreateBlockDialog
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}

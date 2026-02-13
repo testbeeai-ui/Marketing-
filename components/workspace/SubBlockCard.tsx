@@ -45,14 +45,20 @@ interface SubBlockCardProps {
   onClick: () => void;
   onDelete: () => void;
   onModify?: () => void;
+  /** When true (demo org), show "Sample stories ready" instead of "No stories yet" */
+  isDemoMode?: boolean;
 }
 
-export const SubBlockCard = ({ subBlock, onClick, onDelete, onModify }: SubBlockCardProps) => {
-  const hasStories = subBlock.storyVariations && subBlock.storyVariations.length > 0;
+const ensureArray = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+
+export const SubBlockCard = ({ subBlock, onClick, onDelete, onModify, isDemoMode }: SubBlockCardProps) => {
+  const storyVariations = ensureArray(subBlock.storyVariations);
+  const hasStories = storyVariations.length > 0;
+  const showDemoReady = isDemoMode && !hasStories;
   const platformEntries = getPlatformEntriesForVariation(subBlock.platformContents, subBlock.selectedVariationId);
   const platformEntryCount = platformEntries.filter(([key]) => key !== 'imagePrompt' && key !== 'imageContext' && key !== 'image').length;
   const hasPlatformContents = platformEntryCount > 0;
-  const selectedVariation = subBlock.storyVariations?.find(v => v.id === subBlock.selectedVariationId);
+  const selectedVariation = storyVariations.find((v: any) => v.id === subBlock.selectedVariationId);
 
   const handleContextMenuClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -99,8 +105,13 @@ export const SubBlockCard = ({ subBlock, onClick, onDelete, onModify }: SubBlock
               <div className="flex items-center gap-2 text-sm">
                 <div className="w-2 h-2 rounded-full bg-emerald-500" />
                 <span className="text-muted-foreground">
-                  {subBlock.storyVariations.length} story variation{subBlock.storyVariations.length > 1 ? 's' : ''}
+                  {storyVariations.length} story variation{storyVariations.length > 1 ? 's' : ''}
                 </span>
+              </div>
+            ) : showDemoReady ? (
+              <div className="flex items-center gap-2 text-sm">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="text-muted-foreground">Sample stories ready</span>
               </div>
             ) : (
               <div className="flex items-center gap-2 text-sm">

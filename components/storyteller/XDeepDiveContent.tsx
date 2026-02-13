@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { authService } from "@/lib/auth";
 import { ArrowLeft, AlertTriangle, BarChart3, ChevronDown, Info, Camera, Lightbulb, Bot, TrendingUp, Target, ArrowRight, ArrowUpRight, ArrowDownRight, FileText, LayoutGrid, ChevronRight } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,7 @@ import { toast } from "sonner";
 import { AnalyticsChatPanel } from "@/components/storyteller/AnalyticsChatPanel";
 import { AnalyzingOverlay } from "@/components/storyteller/AnalyzingOverlay";
 import { AnalyticsChatProvider } from "@/lib/contexts/AnalyticsChatContext";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
 
 // Demo data matching Twitter Analytics dashboard
 const DEMO_IMPRESSIONS_DATA = [
@@ -110,9 +113,11 @@ interface Snapshot {
 export function XDeepDiveContent() {
   const router = useRouter();
   const { demoMode } = useDemoMode();
+  const { activeOrganization, isDemoMode } = useOrganization();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [posts, setPosts] = useState<Snapshot[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [showRequestAccess, setShowRequestAccess] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [primaryMetric, setPrimaryMetric] = useState("Impressions");
@@ -122,7 +127,8 @@ export function XDeepDiveContent() {
   const [pageGreetingLength, setPageGreetingLength] = useState(0);
   const [screenshotsUploadedTrigger, setScreenshotsUploadedTrigger] = useState(0);
 
-  const useDemo = demoMode;
+  const useDemo = demoMode || isDemoMode;
+  const isMember = activeOrganization?.role === "member";
 
   const PAGE_GREETING_TEXT = "Hello I am Twitter bot for deep analysis and doubts.";
 
@@ -143,10 +149,13 @@ export function XDeepDiveContent() {
   }, []);
 
   const fetchData = useCallback(async () => {
+    if (!activeOrganization?.id) return;
     try {
+      const token = await authService.getSessionToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const [dashRes, postsRes] = await Promise.all([
-        fetch("/api/analytics-snapshots?limit=20&platform=x&type=dashboard"),
-        fetch("/api/analytics-snapshots?limit=20&platform=x&type=post"),
+        fetch(`/api/analytics-snapshots?limit=20&platform=x&type=dashboard&organizationId=${activeOrganization.id}`, { headers }),
+        fetch(`/api/analytics-snapshots?limit=20&platform=x&type=post&organizationId=${activeOrganization.id}`, { headers }),
       ]);
       if (dashRes.ok) {
         const data = (await dashRes.json()) as Snapshot[];
@@ -162,7 +171,7 @@ export function XDeepDiveContent() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [activeOrganization?.id]);
 
   useEffect(() => {
     if (useDemo) return;
@@ -185,9 +194,14 @@ export function XDeepDiveContent() {
     try {
       for (let i = 0; i < valid.length; i++) {
         setUploadProgress({ current: i + 1, total: valid.length });
+        if (!activeOrganization?.id) {
+          toast.error("No active organization selected");
+          continue;
+        }
         const formData = new FormData();
         formData.append("file", valid[i]);
         formData.append("platform", "x");
+        formData.append("organizationId", activeOrganization.id);
         const res = await fetch("/api/analyze-screenshot", { method: "POST", body: formData });
         if (res.ok) {
           const { snapshot: s } = await res.json();
@@ -352,7 +366,7 @@ export function XDeepDiveContent() {
                 </div>
               </div>
               <Button
-                onClick={() => setUploadOpen(true)}
+                onClick={() => (useDemo ? setShowRequestAccess(true) : setUploadOpen(true))}
                 className="bg-[#1DA1F2] hover:bg-[#1a8cd8] text-white shadow-sm shrink-0"
               >
                 <Camera className="w-4 h-4 mr-2" />
@@ -533,7 +547,7 @@ export function XDeepDiveContent() {
                 {timeSeries.length === 0 && !useDemo ? (
                   <div
                     className="h-[280px] flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/20 hover:border-[#1DA1F2]/30 transition-colors cursor-pointer"
-                    onClick={() => setUploadOpen(true)}
+                    onClick={() => (useDemo ? setShowRequestAccess(true) : setUploadOpen(true))}
                   >
                     <TrendingUp className="w-12 h-12 text-muted-foreground/40 mb-3" />
                     <p className="text-sm text-muted-foreground">No impressions data yet</p>
@@ -894,33 +908,41 @@ export function XDeepDiveContent() {
           )}
         </DialogContent>
       </Dialog>
+      <DemoRestrictionDialog
+        open={showRequestAccess}
+        onOpenChange={setShowRequestAccess}
+        title="Request access to upload analytics"
+        description="You're in demo mode. To upload X (Twitter) screenshots and get AI-powered insights, request access. Share your details and we'll get you set up."
+      />
 
-      {/* Floating bot with speech bubble (comment) above it */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-0">
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="relative mb-2 max-w-[280px] sm:max-w-[320px] rounded-2xl rounded-br-md border border-[#1DA1F2]/30 bg-white dark:bg-gray-900 shadow-lg px-4 py-3"
-        >
-          <p className="text-[15px] leading-relaxed text-foreground">
-            {PAGE_GREETING_TEXT.slice(0, pageGreetingLength)}
-            {pageGreetingLength < PAGE_GREETING_TEXT.length && (
-              <span className="inline-block w-0.5 h-4 ml-0.5 align-middle bg-[#1DA1F2] animate-pulse" aria-hidden />
-            )}
-          </p>
-          {/* Bubble tail pointing down to the bot */}
-          <div className="absolute -bottom-2 right-7 w-4 h-4 rotate-45 border-r border-b border-[#1DA1F2]/30 bg-white dark:bg-gray-900 rounded-br-sm" />
-        </motion.div>
-        <Button
-          aria-label="Open Twitter Analytics AI"
-          onClick={() => setChatOpen(true)}
-          className="h-14 w-14 rounded-full bg-[#1DA1F2] shadow-lg hover:bg-[#1a8cd8] flex items-center justify-center"
-        >
-          <Bot className="h-7 w-7 text-white" strokeWidth={2} />
-        </Button>
-      </div>
-      <AnalyticsChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+      {/* Floating bot with speech bubble - hidden for members */}
+      {!isMember && (
+        <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-0">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="relative mb-2 max-w-[280px] sm:max-w-[320px] rounded-2xl rounded-br-md border border-[#1DA1F2]/30 bg-white dark:bg-gray-900 shadow-lg px-4 py-3"
+          >
+            <p className="text-[15px] leading-relaxed text-foreground">
+              {PAGE_GREETING_TEXT.slice(0, pageGreetingLength)}
+              {pageGreetingLength < PAGE_GREETING_TEXT.length && (
+                <span className="inline-block w-0.5 h-4 ml-0.5 align-middle bg-[#1DA1F2] animate-pulse" aria-hidden />
+              )}
+            </p>
+            {/* Bubble tail pointing down to the bot */}
+            <div className="absolute -bottom-2 right-7 w-4 h-4 rotate-45 border-r border-b border-[#1DA1F2]/30 bg-white dark:bg-gray-900 rounded-br-sm" />
+          </motion.div>
+          <Button
+            aria-label="Open Twitter Analytics AI"
+            onClick={() => setChatOpen(true)}
+            className="h-14 w-14 rounded-full bg-[#1DA1F2] shadow-lg hover:bg-[#1a8cd8] flex items-center justify-center"
+          >
+            <Bot className="h-7 w-7 text-white" strokeWidth={2} />
+          </Button>
+          <AnalyticsChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+        </div>
+      )}
     </div>
     </AnalyticsChatProvider>
   );

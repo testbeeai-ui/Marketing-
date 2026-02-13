@@ -47,6 +47,17 @@ export class VectorStore {
     }
 
     try {
+      // Get organization_id from parent block
+      const { data: parentBlock, error: blockError } = await supabase
+        .from('blocks')
+        .select('organization_id')
+        .eq('id', blockId)
+        .single();
+
+      if (blockError || !parentBlock) {
+        throw new Error(`Failed to find parent block ${blockId}: ${blockError?.message || 'Block not found'}`);
+      }
+
       // Generate embedding for the text
       const embedding = await this.embeddingService.generateEmbedding(text);
       
@@ -58,6 +69,7 @@ export class VectorStore {
           user_id: userId,
           block_id: blockId,
           file_id: fileId,
+          organization_id: parentBlock.organization_id,
           text,
           embedding,
           metadata,
@@ -65,6 +77,16 @@ export class VectorStore {
         });
 
       if (error) {
+        if (
+          error.message?.includes('organization_id') ||
+          error.message?.includes('schema cache') ||
+          error.code === '42703'
+        ) {
+          throw new Error(
+            `Database migration not applied: The 'organization_id' column is missing from the 'vector_chunks' table. ` +
+            `Please run migration: 20250212000006_add_organization_id_to_tables.sql (see MIGRATION_GUIDE.md)`
+          );
+        }
         throw new Error(`Failed to store vector chunk: ${error.message}`);
       }
 

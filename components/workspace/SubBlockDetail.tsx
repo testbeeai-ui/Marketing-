@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { StoryEngine } from "./StoryEngine";
 import { renderMarkdown } from "@/lib/markdown";
+import { useOnboardingTour } from "@/lib/contexts/OnboardingTourContext";
 
 interface SubBlockDetailProps {
   subBlock: SubBlock;
@@ -15,6 +16,14 @@ interface SubBlockDetailProps {
   linkedDocuments?: number;
   onBack: () => void;
   onGenerateNew: () => void;
+  /** When true, Generate buttons open request-access form instead of generating */
+  isDemoMode?: boolean;
+  /** Called when demo user clicks Generate; open request-access dialog */
+  onRequestAccess?: () => void;
+  /** From URL when opening from approval "Go to block" */
+  approvalId?: string;
+  /** e.g. linkedin_text – auto-open feedback popup for this asset */
+  highlight?: string;
 }
 
 const storyConfig = [
@@ -59,8 +68,9 @@ const getPlatformEntriesForVariation = (contents: Record<string, string> | undef
   return Object.entries(contents).filter(([key]) => !key.includes('.'));
 };
 
-export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack, onGenerateNew }: SubBlockDetailProps) => {
+export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack, onGenerateNew, isDemoMode, onRequestAccess, approvalId, highlight }: SubBlockDetailProps) => {
   const queryClient = useQueryClient();
+  const { step: onboardingStep } = useOnboardingTour();
   const [selectedStory, setSelectedStory] = useState<{
     id: string;
     title: string;
@@ -102,7 +112,7 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
           </div>
           {!hasStories && (
             <Button
-              onClick={onGenerateNew}
+              onClick={() => (isDemoMode && onRequestAccess ? onRequestAccess() : onGenerateNew())}
               className="gradient-violet hover:opacity-90 text-white border-0"
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -112,7 +122,7 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
           {hasStories && (
             <Button
               variant="outline"
-              onClick={onGenerateNew}
+              onClick={() => (isDemoMode && onRequestAccess ? onRequestAccess() : onGenerateNew())}
               className="hover:bg-primary/10"
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -178,6 +188,7 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
                             })}
                             variant="outline"
                             className="w-full"
+                            {...(isDemoMode && onboardingStep === 1 ? { "data-onboarding-step": "1" } : {})}
                           >
                             View Platform Formats
                           </Button>
@@ -331,6 +342,8 @@ export const SubBlockDetail = ({ subBlock, blockId, linkedDocuments = 0, onBack,
           subBlockId={subBlock.id}
           blockId={blockId}
           generationMode={selectedStory.generationMode}
+          approvalId={approvalId}
+          highlight={highlight}
         />
       )}
     </>
