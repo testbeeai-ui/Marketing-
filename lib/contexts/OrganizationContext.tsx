@@ -79,8 +79,13 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       setOrganizations(orgs);
 
       const savedOrgId = localStorage.getItem("activeOrganizationId");
-      const savedOrg = orgs.find((o) => o.id === savedOrgId) || orgs[0] || null;
-      setActiveOrganizationState(savedOrg);
+      const savedOrg = orgs.find((o) => o.id === savedOrgId) || null;
+      const firstRealOrg = orgs.find((o) => o.id !== PUBLIC_DEMO_ORGANIZATION_ID) || null;
+      const activeOrg =
+        savedOrg?.id === PUBLIC_DEMO_ORGANIZATION_ID && firstRealOrg
+          ? firstRealOrg
+          : savedOrg || firstRealOrg || orgs[0] || null;
+      setActiveOrganizationState(activeOrg);
     } catch (error) {
       console.error("Error in fetchOrganizations:", error);
       // So new users always see Demo Organization even when API fails (e.g. network)
