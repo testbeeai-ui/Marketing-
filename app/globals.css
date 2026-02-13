@@ -210,4 +210,12 @@
   .text-gradient-violet {
     @apply bg-gradient-to-r from-violet-400 to-purple-600 bg-clip-text text-transparent;
   }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }

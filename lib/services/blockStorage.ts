@@ -4,6 +4,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 export interface Block {
   id: string;
   userId: string; // Changed from number to string to match UUID
+  organizationId: string; // Organization ID for multi-tenant isolation
   name: string;
   description: string;
   createdAt: string;
@@ -58,6 +59,23 @@ export class BlockStorage {
     return (data || []).map(this.mapFromDb);
   }
 
+  async getAllByOrganizationId(organizationId: string, client?: SupabaseClient): Promise<Block[]> {
+    console.log(`[BlockStorage] Querying blocks for organization_id: ${organizationId}`);
+    const { data, error } = await this.getDb(client)
+      .from('blocks')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error(`Error fetching blocks for organization ${organizationId}:`, error);
+      return [];
+    }
+
+    console.log(`[BlockStorage] Retrieved ${data?.length || 0} blocks for organization ${organizationId}`);
+    return (data || []).map(this.mapFromDb);
+  }
+
   async get(id: string, client?: SupabaseClient): Promise<Block | undefined> {
     const { data, error } = await this.getDb(client)
       .from('blocks')
@@ -94,12 +112,35 @@ export class BlockStorage {
     return this.mapFromDb(data);
   }
 
+  async getByOrganizationId(id: string, organizationId: string, client?: SupabaseClient): Promise<Block | undefined> {
+    const { data, error } = await this.getDb(client)
+      .from('blocks')
+      .select('*')
+      .eq('id', id)
+      .eq('organization_id', organizationId)
+      .single();
+
+    if (error) {
+      if (error.code !== 'PGRST116') {
+        console.error(`Error fetching block ${id} for organization ${organizationId}:`, error);
+      }
+      return undefined;
+    }
+
+    return this.mapFromDb(data);
+  }
+
   async create(block: Block, client?: SupabaseClient): Promise<Block> {
+    if (!block.organizationId) {
+      throw new Error('Organization ID is required to create a block');
+    }
+
     const { error } = await this.getDb(client)
       .from('blocks')
       .insert({
         id: block.id,
         user_id: block.userId,
+        organization_id: block.organizationId,
         name: block.name,
         description: block.description,
         created_at: block.createdAt,
@@ -107,6 +148,22 @@ export class BlockStorage {
       });
 
     if (error) {
+      // Check if error is about missing organization_id column
+      if (
+        error.message?.includes('organization_id') ||
+        error.message?.includes('schema cache') ||
+        error.code === '42703' // PostgreSQL undefined_column
+      ) {
+        throw new Error(
+          `Database migration not applied: The 'organization_id' column is missing from the 'blocks' table. ` +
+          `Please run the migrations in Supabase Dashboard: ` +
+          `1. Go to Supabase Dashboard > SQL Editor\n` +
+          `2. Run migration: 20250212000006_add_organization_id_to_tables.sql\n` +
+          `3. Run migration: 20250212000007_migrate_existing_data_to_orgs.sql\n` +
+          `4. Run migration: 20250212000008_update_rls_for_orgs.sql\n` +
+          `5. Refresh the schema cache in Supabase Dashboard > Settings > API`
+        );
+      }
       throw new Error(`Failed to create block: ${error.message}`);
     }
 
@@ -164,6 +221,7 @@ export class BlockStorage {
     return {
       id: row.id,
       userId: row.user_id,
+      organizationId: row.organization_id,
       name: row.name,
       description: row.description,
       createdAt: row.created_at,

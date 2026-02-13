@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { authService } from "@/lib/auth";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -14,6 +16,9 @@ import {
   LayoutGrid,
   ChevronRight,
   Instagram,
+  BarChart2,
+  Users,
+  Eye,
 } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
@@ -41,6 +46,7 @@ import { toast } from "sonner";
 import { AnalyticsChatPanel } from "@/components/storyteller/AnalyticsChatPanel";
 import { AnalyticsChatProvider } from "@/lib/contexts/AnalyticsChatContext";
 import { getPlatformWatchByPlatform } from "@/lib/storyteller/platformWatch";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
 
 // Instagram gradient colors
 const IG_PINK = "#E4405F";
@@ -60,6 +66,25 @@ interface MetricCard {
   change?: number;
 }
 
+interface ContentItem {
+  content_preview?: string;
+  post_date?: string;
+  views?: number;
+  likes?: number;
+  shares?: number;
+  interactions?: number;
+}
+
+function MetricBlock({ label, value, suffix = "" }: { label: string; value: number; suffix?: string }) {
+  const display = typeof value === "number" && (value > 999 || value < -999) ? value.toLocaleString() : String(value);
+  return (
+    <div className="rounded-lg border border-border/70 bg-background/80 dark:bg-background/50 p-4">
+      <p className="text-xs text-muted-foreground truncate">{label}</p>
+      <p className="text-xl font-bold tabular-nums mt-0.5">{display}{suffix}</p>
+    </div>
+  );
+}
+
 interface Snapshot {
   id: string;
   platform: string;
@@ -72,6 +97,10 @@ interface Snapshot {
       anomaly_detected?: string;
       actionable_advice?: string;
     };
+    sections?: Record<string, Record<string, number | null>>;
+    recent_content?: ContentItem[] | null;
+    top_content_by_views?: ContentItem[] | null;
+    top_content_by_interactions?: ContentItem[] | null;
   } | null;
   ai_insights?: {
     anomaly_detected?: string;
@@ -83,19 +112,27 @@ interface Snapshot {
 export function InstagramDeepDiveContent() {
   const router = useRouter();
   const { demoMode } = useDemoMode();
+  const { activeOrganization, isDemoMode } = useOrganization();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [showRequestAccess, setShowRequestAccess] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [screenshotsUploadedTrigger, setScreenshotsUploadedTrigger] = useState(0);
 
-  const useDemo = demoMode;
+  const useDemo = demoMode || isDemoMode;
   const platformWatch = getPlatformWatchByPlatform("instagram");
+  const isMember = activeOrganization?.role === "member";
 
   const fetchData = useCallback(async () => {
+    if (!activeOrganization?.id) return;
     try {
-      const res = await fetch("/api/analytics-snapshots?limit=20&platform=instagram&type=dashboard");
+      const token = await authService.getSessionToken();
+      const res = await fetch(
+        `/api/analytics-snapshots?limit=20&platform=instagram&type=dashboard&organizationId=${activeOrganization.id}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+      );
       if (res.ok) {
         const data = (await res.json()) as Snapshot[];
         if (data?.length > 0) {
@@ -106,7 +143,7 @@ export function InstagramDeepDiveContent() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [activeOrganization?.id]);
 
   useEffect(() => {
     if (useDemo) return;
@@ -127,9 +164,14 @@ export function InstagramDeepDiveContent() {
       try {
         for (let i = 0; i < valid.length; i++) {
           setUploadProgress({ current: i + 1, total: valid.length });
+          if (!activeOrganization?.id) {
+            toast.error("No active organization selected");
+            continue;
+          }
           const formData = new FormData();
           formData.append("file", valid[i]);
           formData.append("platform", "instagram");
+          formData.append("organizationId", activeOrganization.id);
           const res = await fetch("/api/analyze-screenshot", { method: "POST", body: formData });
           if (res.ok) successCount++;
           else {
@@ -190,6 +232,29 @@ export function InstagramDeepDiveContent() {
   const comments = useDemo ? 42 : (metrics.replies ?? metrics.comments ?? 0);
   const saves = useDemo ? 89 : (metrics.saves ?? metrics.bookmarks ?? 0);
   const shares = useDemo ? 28 : (metrics.shares ?? 0);
+
+  const views = metrics.views ?? null;
+  const viewers = metrics.viewers ?? null;
+  const viewsFollowersPct = metrics.views_followers_pct ?? null;
+  const viewsNonFollowersPct = metrics.views_non_followers_pct ?? null;
+  const postsPct = metrics.posts_pct ?? null;
+  const reelsPct = metrics.reels_pct ?? null;
+  const totalInteractions = metrics.total_interactions ?? null;
+  const interactionsFollowersPct = metrics.interactions_followers_pct ?? null;
+  const interactionsNonFollowersPct = metrics.interactions_non_followers_pct ?? null;
+  const accountsEngaged = metrics.accounts_engaged ?? null;
+  const postsInteractionsPct = metrics.posts_interactions_pct ?? null;
+  const reelsInteractionsPct = metrics.reels_interactions_pct ?? null;
+  const profileActivity = metrics.profile_activity ?? null;
+
+  const hasAccountInsights = [views, viewers, viewsFollowersPct, viewsNonFollowersPct].some((v) => v != null);
+  const hasByContentType = [postsPct, reelsPct].some((v) => v != null);
+  const hasInteractions = [totalInteractions, interactionsFollowersPct, interactionsNonFollowersPct, accountsEngaged].some((v) => v != null);
+  const hasByContentInteractions = [postsInteractionsPct, reelsInteractionsPct].some((v) => v != null);
+  const hasProfile = [profileActivity, profileVisits].some((v) => v != null);
+  const topContentByViews = (extracted.top_content_by_views ?? []) as ContentItem[];
+  const topContentByInteractions = (extracted.top_content_by_interactions ?? []) as ContentItem[];
+  const hasTopContent = (topContentByViews.length > 0 || topContentByInteractions.length > 0) && !useDemo;
 
   const anomalyText = useDemo
     ? "Shares (sends) per reach dropped—authenticity and DMs matter more than likes. Reels underperforming vs carousels this week."
@@ -261,7 +326,7 @@ export function InstagramDeepDiveContent() {
                 </div>
               </div>
               <Button
-                onClick={() => setUploadOpen(true)}
+                onClick={() => (useDemo ? setShowRequestAccess(true) : setUploadOpen(true))}
                 className="bg-gradient-to-r from-[#E4405F] to-[#C13584] hover:opacity-90 text-white shadow-sm shrink-0"
               >
                 <Camera className="w-4 h-4 mr-2" />
@@ -368,7 +433,7 @@ export function InstagramDeepDiveContent() {
                 {timeSeries.length === 0 && !useDemo ? (
                   <div
                     className="h-[280px] flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/20 hover:border-pink-500/30 transition-colors cursor-pointer"
-                    onClick={() => setUploadOpen(true)}
+                    onClick={() => (useDemo ? setShowRequestAccess(true) : setUploadOpen(true))}
                   >
                     <TrendingUp className="w-12 h-12 text-muted-foreground/40 mb-3" />
                     <p className="text-sm text-muted-foreground">No reach data yet</p>
@@ -425,6 +490,160 @@ export function InstagramDeepDiveContent() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {/* Account insights */}
+          {hasAccountInsights && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
+              <Card className="border-pink-200/60 dark:border-pink-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-pink-600" />
+                    Account insights
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Views, viewers, followers vs non-followers</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {views != null && <MetricBlock label="Views" value={views} />}
+                    {viewers != null && <MetricBlock label="Viewers" value={viewers} />}
+                    {viewsFollowersPct != null && <MetricBlock label="Views from followers" value={viewsFollowersPct} suffix="%" />}
+                    {viewsNonFollowersPct != null && <MetricBlock label="Views from non-followers" value={viewsNonFollowersPct} suffix="%" />}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* By content type */}
+          {hasByContentType && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
+              <Card className="border-pink-200/60 dark:border-pink-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-pink-600" />
+                    By content type
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Posts vs Reels distribution</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    {postsPct != null && <MetricBlock label="Posts" value={postsPct} suffix="%" />}
+                    {reelsPct != null && <MetricBlock label="Reels" value={reelsPct} suffix="%" />}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* Interactions */}
+          {hasInteractions && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
+              <Card className="border-pink-200/60 dark:border-pink-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="w-4 h-4 text-pink-600" />
+                    Interactions
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Total interactions, followers vs non-followers, accounts engaged</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {totalInteractions != null && <MetricBlock label="Total interactions" value={totalInteractions} />}
+                    {interactionsFollowersPct != null && <MetricBlock label="From followers" value={interactionsFollowersPct} suffix="%" />}
+                    {interactionsNonFollowersPct != null && <MetricBlock label="From non-followers" value={interactionsNonFollowersPct} suffix="%" />}
+                    {accountsEngaged != null && <MetricBlock label="Accounts engaged" value={accountsEngaged} />}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* By content interactions */}
+          {hasByContentInteractions && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
+              <Card className="border-pink-200/60 dark:border-pink-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-pink-600" />
+                    By content interactions
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Posts vs Reels interaction share</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    {postsInteractionsPct != null && <MetricBlock label="Posts" value={postsInteractionsPct} suffix="%" />}
+                    {reelsInteractionsPct != null && <MetricBlock label="Reels" value={reelsInteractionsPct} suffix="%" />}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* Profile */}
+          {hasProfile && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
+              <Card className="border-pink-200/60 dark:border-pink-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="w-4 h-4 text-pink-600" />
+                    Profile
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Profile activity and visits</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    {profileActivity != null && <MetricBlock label="Profile activity" value={profileActivity} />}
+                    {profileVisits != null && <MetricBlock label="Profile visits" value={profileVisits} />}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* Top content by views / by interactions */}
+          {hasTopContent && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
+              <Card className="border-pink-200/60 dark:border-pink-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-pink-600" />
+                    Top content
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">By views and by interactions</p>
+                </CardHeader>
+                <CardContent>
+                  {topContentByViews.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">By views</p>
+                      <ul className="space-y-2">
+                        {topContentByViews.slice(0, 5).map((item, i) => (
+                          <li key={i} className="flex flex-wrap items-center gap-3 rounded-lg border border-border/70 p-3 text-sm">
+                            {item.content_preview && <span className="flex-1 min-w-0 truncate">{item.content_preview}</span>}
+                            {item.post_date && <span className="text-muted-foreground">{item.post_date}</span>}
+                            {item.views != null && <span>Views: {item.views}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {topContentByInteractions.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">By interactions</p>
+                      <ul className="space-y-2">
+                        {topContentByInteractions.slice(0, 5).map((item, i) => (
+                          <li key={i} className="flex flex-wrap items-center gap-3 rounded-lg border border-border/70 p-3 text-sm">
+                            {item.content_preview && <span className="flex-1 min-w-0 truncate">{item.content_preview}</span>}
+                            {item.post_date && <span className="text-muted-foreground">{item.post_date}</span>}
+                            {item.interactions != null && <span>Interactions: {item.interactions}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
 
           {/* Engagement Funnel */}
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
@@ -497,15 +716,25 @@ export function InstagramDeepDiveContent() {
           )}
         </DialogContent>
       </Dialog>
+      <DemoRestrictionDialog
+        open={showRequestAccess}
+        onOpenChange={setShowRequestAccess}
+        title="Request access to upload analytics"
+        description="You're in demo mode. To upload Instagram screenshots and get AI-powered insights, request access. Share your details and we'll get you set up."
+      />
 
-      <Button
-        aria-label="Open Instagram Analytics Assistant"
-        onClick={() => setChatOpen(true)}
-        className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-gradient-to-r from-[#E4405F] to-[#C13584] shadow-lg hover:opacity-90"
-      >
-        <Bot className="h-7 w-7 text-white" strokeWidth={2} />
-      </Button>
-      <AnalyticsChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+      {!isMember && (
+        <>
+          <Button
+            aria-label="Open Instagram Analytics Assistant"
+            onClick={() => setChatOpen(true)}
+            className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-gradient-to-r from-[#E4405F] to-[#C13584] shadow-lg hover:opacity-90"
+          >
+            <Bot className="h-7 w-7 text-white" strokeWidth={2} />
+          </Button>
+          <AnalyticsChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+        </>
+      )}
     </div>
     </AnalyticsChatProvider>
   );

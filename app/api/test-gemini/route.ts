@@ -3,9 +3,12 @@ import { getUserIdFromRequest } from '@/lib/auth-server';
 
 /**
  * Quick test to verify GOOGLE_API_KEY works from the app.
- * GET /api/test-gemini - call from browser. Delete after debugging.
+ * GET /api/test-gemini - development only; disabled in production for security.
  */
 export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not available' }, { status: 404 });
+  }
   const userId = await getUserIdFromRequest(request);
   if (!userId) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });

@@ -126,12 +126,24 @@ export class SubBlockStorage {
   }
 
   async create(subBlock: SubBlock): Promise<SubBlock> {
+    // Get organization_id from parent block
+    const { data: parentBlock, error: blockError } = await this.getDb()
+      .from('blocks')
+      .select('organization_id')
+      .eq('id', subBlock.blockId)
+      .single();
+
+    if (blockError || !parentBlock) {
+      throw new Error(`Failed to find parent block ${subBlock.blockId}: ${blockError?.message || 'Block not found'}`);
+    }
+
     const { error } = await this.getDb()
       .from('sub_blocks')
       .insert({
         id: subBlock.id,
         user_id: subBlock.userId,
         block_id: subBlock.blockId,
+        organization_id: parentBlock.organization_id,
         name: subBlock.name,
         prompt: subBlock.prompt,
         story_variations: subBlock.storyVariations,
@@ -142,6 +154,16 @@ export class SubBlockStorage {
       });
 
     if (error) {
+      if (
+        error.message?.includes('organization_id') ||
+        error.message?.includes('schema cache') ||
+        error.code === '42703'
+      ) {
+        throw new Error(
+          `Database migration not applied: The 'organization_id' column is missing from the 'sub_blocks' table. ` +
+          `Please run migration: 20250212000006_add_organization_id_to_tables.sql (see MIGRATION_GUIDE.md)`
+        );
+      }
       throw new Error(`Failed to create sub-block: ${error.message}`);
     }
 

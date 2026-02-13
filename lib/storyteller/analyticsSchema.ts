@@ -68,7 +68,34 @@ export interface NormalizedExtractedData {
     post_date: string | null;
     content_preview: string | null;
     format: string | null;
+    shares?: number | null;
   } | null;
+  /** Optional dashboard sections (e.g. benchmarking, audience, messaging); also flattened into metrics with section_ prefix */
+  sections?: Record<string, Record<string, number | null>> | null;
+  /** Recent or top content items with views, likes, shares */
+  recent_content?: Array<{ content_preview?: string; post_date?: string; views?: number; likes?: number; shares?: number }> | null;
+  top_content_by_views?: Array<{ content_preview?: string; post_date?: string; views?: number; likes?: number; shares?: number }> | null;
+  top_content_by_interactions?: Array<{ content_preview?: string; post_date?: string; interactions?: number }> | null;
+}
+
+/**
+ * Flattens section metrics into a single object with prefixed keys (e.g. benchmarking_published_content)
+ * so UI can read from extracted_data.metrics without duplicating logic.
+ */
+export function flattenSectionsIntoMetrics(
+  sections: Record<string, Record<string, unknown>> | null | undefined
+): Record<string, number | null> {
+  if (!sections || typeof sections !== 'object') return {};
+  const out: Record<string, number | null> = {};
+  for (const [sectionName, sectionMetrics] of Object.entries(sections)) {
+    if (!sectionMetrics || typeof sectionMetrics !== 'object') continue;
+    const prefix = sectionName.replace(/\s+/g, '_').toLowerCase();
+    for (const [key, value] of Object.entries(sectionMetrics)) {
+      const flatKey = `${prefix}_${key}`;
+      out[flatKey] = typeof value === 'number' ? value : null;
+    }
+  }
+  return out;
 }
 
 /**
@@ -105,6 +132,11 @@ export function normalizeExtractedData(raw: Record<string, unknown>): Record<str
     period_date: normalizeDate(p.period) ?? undefined,
   })) ?? null;
 
+  const baseMetrics = (raw.metrics as Record<string, number | null> | null) ?? {};
+  const sections = raw.sections as Record<string, Record<string, unknown>> | null | undefined;
+  const flattened = flattenSectionsIntoMetrics(sections);
+  const metrics = { ...baseMetrics, ...flattened };
+
   return {
     ...raw,
     snapshot_type: snapshotType,
@@ -114,6 +146,7 @@ export function normalizeExtractedData(raw: Record<string, unknown>): Record<str
     post_date: postDate,
     post_date_display: postDateDisplay,
     time_series: timeSeries,
+    metrics,
   };
 }
 

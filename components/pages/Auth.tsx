@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Eye, EyeOff, Sparkles, ArrowRight, LogIn, UserPlus } from "lucide-react";
+import Link from "next/link";
+import { Mail, Lock, Eye, EyeOff, Sparkles, ArrowRight, LogIn, UserPlus, TicketCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -507,6 +508,18 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key`}
               )}
             </Button>
 
+            {/* Invitation code button - under Sign In */}
+            <Link href="/invite" className="block">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-11 border-primary/40 text-primary hover:bg-primary/10 hover:text-primary"
+              >
+                <TicketCheck className="w-4 h-4 mr-2" />
+                Invitation code
+              </Button>
+            </Link>
+
             {/* Divider */}
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
@@ -594,6 +607,18 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key`}
                   {mode === "login" ? "Sign up" : "Sign in"}
                 </button>
               </p>
+              <div className="mt-4 p-3 rounded-lg border-2 border-primary/30 bg-primary/5">
+                <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <TicketCheck className="w-4 h-4 text-primary shrink-0" />
+                  Have an invitation code?
+                </p>
+                <Link
+                  href="/invite"
+                  className="inline-flex items-center gap-1.5 mt-1.5 text-sm font-semibold text-primary hover:underline underline-offset-2"
+                >
+                  Paste it here
+                </Link>
+              </div>
             </div>
           </form>
         </motion.div>

@@ -3,7 +3,8 @@ import { fileProcessor } from '@/lib/services/fileProcessor';
 import { vectorStore } from '@/lib/services/vectorStore';
 import { knowledgeBase } from '@/lib/services/knowledgeBase';
 import { blockStorage } from '@/lib/services/blockStorage';
-import { getUserIdFromRequest } from '@/lib/auth-server';
+import { getUserIdFromRequest, createAuthenticatedClient } from '@/lib/auth-server';
+import { isDemoOrganizationId, isPublicDemoOrganizationId } from '@/lib/constants';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const documentBlockId = formData.get('blockId') as string;
+    const organizationId = formData.get('organizationId') as string | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -24,6 +26,10 @@ export async function POST(request: NextRequest) {
 
     if (!documentBlockId) {
       return NextResponse.json({ error: 'No blockId provided' }, { status: 400 });
+    }
+
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
     // Validate file size (10MB limit)
@@ -46,9 +52,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 });
     }
 
-    // Ensure block exists for this user
+    const supabase = await createAuthenticatedClient();
+    const { data: membership } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('organization_id', organizationId)
+      .eq('user_id', userId)
+      .single();
+    if (!membership) {
+      return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+    }
+    if ((isDemoOrganizationId(organizationId) || isPublicDemoOrganizationId(organizationId)) && membership.role !== 'owner' && membership.role !== 'admin') {
+      return NextResponse.json({ error: 'Cannot upload files in demo organization.' }, { status: 403 });
+    }
+
+    // Ensure block exists and belongs to this organization
     await blockStorage.ensureLoaded();
-    const existingBlock = await blockStorage.getByUserId(documentBlockId, userId);
+    const existingBlock = await blockStorage.getByOrganizationId(documentBlockId, organizationId, supabase);
     if (!existingBlock) {
       return NextResponse.json({ error: 'Block not found' }, { status: 404 });
     }
@@ -191,6 +211,13 @@ export async function DELETE(request: NextRequest) {
 
     if (!fileId) {
       return NextResponse.json({ error: 'File ID required' }, { status: 400 });
+    }
+
+    if (fileId.startsWith('demo-doc-')) {
+      return NextResponse.json(
+        { error: 'Demo documents cannot be deleted' },
+        { status: 403 }
+      );
     }
 
     // Delete file and related data

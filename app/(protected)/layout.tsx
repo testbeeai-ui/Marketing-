@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { OrganizationProvider } from "@/lib/contexts/OrganizationContext";
+import { Navbar } from "@/components/layout/Navbar";
+import { OnboardingTourWrapper } from "@/components/onboarding/OnboardingTourWrapper";
 
 export default function ProtectedLayout({
     children,
@@ -62,5 +65,16 @@ export default function ProtectedLayout({
         return null;
     }
 
-    return <>{children}</>;
+    return (
+        <OrganizationProvider>
+            <OnboardingTourWrapper>
+                <div className="min-h-screen bg-background">
+                    <Navbar />
+                    <main className="pt-16">
+                        {children}
+                    </main>
+                </div>
+            </OnboardingTourWrapper>
+        </OrganizationProvider>
+    );
 }

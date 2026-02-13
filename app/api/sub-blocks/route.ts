@@ -2,7 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { subBlockStorage } from '@/lib/services/subBlockStorage';
 import { blockStorage } from '@/lib/services/blockStorage';
 import { getNumericUserIdFromRequest } from '@/lib/auth-server';
+import { createAuthenticatedClient } from '@/lib/auth-server';
 import { createSubBlockSchema, updateSubBlockSchema } from '@/lib/validations/api';
+import { isDemoOrganizationId, isPublicDemoOrganizationId } from '@/lib/constants';
+
+function normalizeStoryVariations(val: any): any[] {
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === 'object' && Array.isArray(val.variations)) return val.variations;
+  return [];
+}
+
+function mapSubBlockFromDb(row: any) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    blockId: row.block_id,
+    name: row.name,
+    prompt: row.prompt,
+    storyVariations: normalizeStoryVariations(row.story_variations),
+    selectedVariationId: row.selected_variation_id,
+    platformContents: row.platform_contents || {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 // GET /api/sub-blocks?blockId=xxx or /api/sub-blocks?id=xxx
 export async function GET(request: NextRequest) {
@@ -18,7 +41,18 @@ export async function GET(request: NextRequest) {
 
         await subBlockStorage.ensureLoaded();
         if (id) {
-            const subBlock = await subBlockStorage.getByUserId(id, userId);
+            let subBlock = await subBlockStorage.getByUserId(id, userId);
+            if (!subBlock) {
+                const supabaseForId = await createAuthenticatedClient();
+                const { data: row } = await supabaseForId
+                    .from('sub_blocks')
+                    .select('*')
+                    .eq('id', id)
+                    .single();
+                if (row?.organization_id && (isDemoOrganizationId(row.organization_id) || isPublicDemoOrganizationId(row.organization_id))) {
+                    subBlock = mapSubBlockFromDb(row);
+                }
+            }
             if (!subBlock) {
                 return NextResponse.json({ error: 'Sub-block not found' }, { status: 404 });
             }
@@ -28,6 +62,28 @@ export async function GET(request: NextRequest) {
         if (!blockId) {
             return NextResponse.json({ error: 'blockId is required' }, { status: 400 });
         }
+
+        const supabase = await createAuthenticatedClient();
+        const { data: block } = await supabase
+            .from('blocks')
+            .select('organization_id')
+            .eq('id', blockId)
+            .single();
+
+        if (block?.organization_id && (isDemoOrganizationId(block.organization_id) || isPublicDemoOrganizationId(block.organization_id))) {
+            const { data: rows, error } = await supabase
+                .from('sub_blocks')
+                .select('*')
+                .eq('block_id', blockId)
+                .order('created_at', { ascending: false });
+            if (error) {
+                console.error('Error fetching demo sub-blocks:', error);
+                return NextResponse.json({ error: error.message }, { status: 500 });
+            }
+            const subBlocks = (rows || []).map(mapSubBlockFromDb);
+            return NextResponse.json(subBlocks);
+        }
+
         const subBlocks = await subBlockStorage.getAllByBlockId(blockId, userId);
         return NextResponse.json(subBlocks);
     } catch (error: any) {
@@ -98,8 +154,19 @@ export async function PUT(request: NextRequest) {
         const { id, storyVariations, selectedVariationId, platformContents, name, prompt } = validation.data;
 
         await subBlockStorage.ensureLoaded();
-        const existing = await subBlockStorage.getByUserId(id, userId);
+        let existing = await subBlockStorage.getByUserId(id, userId);
         if (!existing) {
+            // Demo sub-blocks live in Supabase only; treat as read-only and return 200 without persisting
+            const supabase = await createAuthenticatedClient();
+            const { data: row } = await supabase
+                .from('sub_blocks')
+                .select('*')
+                .eq('id', id)
+                .single();
+            if (row?.organization_id && (isDemoOrganizationId(row.organization_id) || isPublicDemoOrganizationId(row.organization_id))) {
+                const demoSubBlock = mapSubBlockFromDb(row);
+                return NextResponse.json(demoSubBlock);
+            }
             return NextResponse.json({ error: 'Sub-block not found' }, { status: 404 });
         }
 

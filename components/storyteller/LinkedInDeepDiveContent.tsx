@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
+import { useOrganization } from "@/lib/contexts/OrganizationContext";
+import { authService } from "@/lib/auth";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -20,6 +22,8 @@ import {
   LayoutGrid,
   ChevronRight,
   Linkedin,
+  Search,
+  CheckSquare,
 } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
@@ -48,6 +52,7 @@ import { toast } from "sonner";
 import { AnalyticsChatPanel } from "@/components/storyteller/AnalyticsChatPanel";
 import { AnalyticsChatProvider } from "@/lib/contexts/AnalyticsChatContext";
 import { getPlatformWatchByPlatform } from "@/lib/storyteller/platformWatch";
+import { DemoRestrictionDialog } from "@/components/DemoRestrictionDialog";
 
 const LINKEDIN_BLUE = "#0A66C2";
 
@@ -84,6 +89,16 @@ interface PostData {
   format?: string | null;
 }
 
+function MetricBlock({ label, value, suffix = "" }: { label: string; value: number; suffix?: string }) {
+  const display = typeof value === "number" && (value > 999 || value < -999) ? value.toLocaleString() : String(value);
+  return (
+    <div className="rounded-lg border border-border/70 bg-background/80 dark:bg-background/50 p-4">
+      <p className="text-xs text-muted-foreground truncate">{label}</p>
+      <p className="text-xl font-bold tabular-nums mt-0.5">{display}{suffix}</p>
+    </div>
+  );
+}
+
 interface Snapshot {
   id: string;
   platform: string;
@@ -110,22 +125,28 @@ interface Snapshot {
 export function LinkedInDeepDiveContent() {
   const router = useRouter();
   const { demoMode } = useDemoMode();
+  const { activeOrganization, isDemoMode } = useOrganization();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [posts, setPosts] = useState<Snapshot[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [showRequestAccess, setShowRequestAccess] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [screenshotsUploadedTrigger, setScreenshotsUploadedTrigger] = useState(0);
 
-  const useDemo = demoMode;
+  const useDemo = demoMode || isDemoMode;
   const platformWatch = getPlatformWatchByPlatform("linkedin");
+  const isMember = activeOrganization?.role === "member";
 
   const fetchData = useCallback(async () => {
+    if (!activeOrganization?.id) return;
     try {
+      const token = await authService.getSessionToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const [dashRes, postsRes] = await Promise.all([
-        fetch("/api/analytics-snapshots?limit=20&platform=linkedin&type=dashboard"),
-        fetch("/api/analytics-snapshots?limit=20&platform=linkedin&type=post"),
+        fetch(`/api/analytics-snapshots?limit=20&platform=linkedin&type=dashboard&organizationId=${activeOrganization.id}`, { headers }),
+        fetch(`/api/analytics-snapshots?limit=20&platform=linkedin&type=post&organizationId=${activeOrganization.id}`, { headers }),
       ]);
       if (dashRes.ok) {
         const data = (await dashRes.json()) as Snapshot[];
@@ -141,7 +162,7 @@ export function LinkedInDeepDiveContent() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [activeOrganization?.id]);
 
   useEffect(() => {
     if (useDemo) return;
@@ -162,9 +183,14 @@ export function LinkedInDeepDiveContent() {
       try {
         for (let i = 0; i < valid.length; i++) {
           setUploadProgress({ current: i + 1, total: valid.length });
+          if (!activeOrganization?.id) {
+            toast.error("No active organization selected");
+            continue;
+          }
           const formData = new FormData();
           formData.append("file", valid[i]);
           formData.append("platform", "linkedin");
+          formData.append("organizationId", activeOrganization.id);
           const res = await fetch("/api/analyze-screenshot", { method: "POST", body: formData });
           if (res.ok) successCount++;
           else {
@@ -215,7 +241,17 @@ export function LinkedInDeepDiveContent() {
   const timeSeries =
     useDemo ? DEMO_IMPRESSIONS_DATA : extracted.time_series?.map((p) => ({ period: p.period, value: p.value })) || [];
 
-  const impressions = useDemo ? 1915 : (metrics.impressions ?? 0);
+  const postImpressions = metrics.post_impressions ?? null;
+  const postImpressionsChange7d = metrics.post_impressions_change_7d ?? null;
+  const followersChange7d = metrics.followers_change_7d ?? null;
+  const profileViewers90d = metrics.profile_viewers_90d ?? null;
+  const searchAppearancesWeek = metrics.search_appearances_week ?? null;
+  const weeklyActionsDone = metrics.weekly_actions_done ?? null;
+  const weeklyActionsGoal = metrics.weekly_actions_goal ?? null;
+  const postsThisWeek = metrics.posts_this_week ?? null;
+  const commentsThisWeek = metrics.comments_this_week ?? null;
+
+  const impressions = useDemo ? 1915 : (metrics.post_impressions ?? metrics.impressions ?? 0);
   const rawEngagement = useDemo ? 8.2 : (metrics.engagement_rate ?? 0);
   const engagementRate = rawEngagement > 0 && rawEngagement < 1 ? rawEngagement * 100 : rawEngagement;
   const profileVisits = useDemo ? 89 : (metrics.profile_visits ?? 0);
@@ -224,6 +260,9 @@ export function LinkedInDeepDiveContent() {
   const comments = useDemo ? 24 : (metrics.replies ?? metrics.comments ?? 0);
   const reposts = useDemo ? 12 : (metrics.reposts ?? metrics.shares ?? 0);
   const engagements = reactions + comments + reposts;
+
+  const hasAnalytics = [postImpressions, postImpressionsChange7d, followersChange7d, profileViewers90d, searchAppearancesWeek].some((v) => v != null);
+  const hasWeeklySharing = [weeklyActionsDone, weeklyActionsGoal, postsThisWeek, commentsThisWeek].some((v) => v != null);
 
   const anomalyText = useDemo
     ? "LinkedIn reach dropped 22% this week; post frequency and newsletter engagement are down."
@@ -291,7 +330,7 @@ export function LinkedInDeepDiveContent() {
                 </div>
               </div>
               <Button
-                onClick={() => setUploadOpen(true)}
+                onClick={() => (useDemo ? setShowRequestAccess(true) : setUploadOpen(true))}
                 className="text-white shadow-sm shrink-0"
                 style={{ backgroundColor: LINKEDIN_BLUE }}
               >
@@ -399,7 +438,7 @@ export function LinkedInDeepDiveContent() {
                 {timeSeries.length === 0 && !useDemo ? (
                   <div
                     className="h-[280px] flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/20 hover:border-blue-500/30 transition-colors cursor-pointer"
-                    onClick={() => setUploadOpen(true)}
+                    onClick={() => (useDemo ? setShowRequestAccess(true) : setUploadOpen(true))}
                   >
                     <TrendingUp className="w-12 h-12 text-muted-foreground/40 mb-3" />
                     <p className="text-sm text-muted-foreground">No impressions data yet</p>
@@ -489,6 +528,77 @@ export function LinkedInDeepDiveContent() {
             </Card>
           </motion.div>
 
+          {/* Analytics (post impressions, followers change, profile viewers 90d, search appearances) */}
+          {hasAnalytics && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
+              <Card className="border-blue-200/60 dark:border-blue-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4" style={{ color: LINKEDIN_BLUE }} />
+                    Analytics & tools
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Post impressions, followers, profile viewers, search appearances</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {postImpressions != null && <MetricBlock label="Post impressions" value={postImpressions} />}
+                    {postImpressionsChange7d != null && (
+                      <div className="rounded-lg border border-border/70 bg-background/80 p-4">
+                        <p className="text-xs text-muted-foreground">Impressions (7d change)</p>
+                        <p className="text-xl font-bold tabular-nums">{postImpressionsChange7d > 0 ? "+" : ""}{postImpressionsChange7d}%</p>
+                      </div>
+                    )}
+                    {followers != null && <MetricBlock label="Followers" value={followers} />}
+                    {followersChange7d != null && (
+                      <div className="rounded-lg border border-border/70 bg-background/80 p-4">
+                        <p className="text-xs text-muted-foreground">Followers (7d change)</p>
+                        <p className="text-xl font-bold tabular-nums">{followersChange7d > 0 ? "+" : ""}{followersChange7d}%</p>
+                      </div>
+                    )}
+                    {profileViewers90d != null && <MetricBlock label="Profile viewers (90d)" value={profileViewers90d} />}
+                    {searchAppearancesWeek != null && (
+                      <div className="rounded-lg border border-border/70 bg-background/80 p-4">
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Search className="w-3.5 h-3.5" /> Search appearances (week)
+                        </p>
+                        <p className="text-xl font-bold tabular-nums mt-0.5">{searchAppearancesWeek}</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* Weekly sharing tracker */}
+          {hasWeeklySharing && !useDemo && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
+              <Card className="border-blue-200/60 dark:border-blue-900/40">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CheckSquare className="w-4 h-4" style={{ color: LINKEDIN_BLUE }} />
+                    Weekly sharing tracker
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">Actions done vs goal, posts and comments this week</p>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {weeklyActionsDone != null && weeklyActionsGoal != null && (
+                      <div className="rounded-lg border border-border/70 bg-background/80 p-4">
+                        <p className="text-xs text-muted-foreground">Actions completed</p>
+                        <p className="text-xl font-bold tabular-nums">{weeklyActionsDone} / {weeklyActionsGoal}</p>
+                      </div>
+                    )}
+                    {weeklyActionsDone != null && weeklyActionsGoal == null && <MetricBlock label="Actions done" value={weeklyActionsDone} />}
+                    {weeklyActionsGoal != null && weeklyActionsDone == null && <MetricBlock label="Weekly goal" value={weeklyActionsGoal} />}
+                    {postsThisWeek != null && <MetricBlock label="Posts this week" value={postsThisWeek} />}
+                    {commentsThisWeek != null && <MetricBlock label="Comments this week" value={commentsThisWeek} />}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
           {/* Reach Funnel */}
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
             <Card className="border-amber-200/70 dark:border-amber-900/40 bg-gradient-to-br from-amber-50/30 to-white dark:from-amber-950/10 dark:to-background">
@@ -560,16 +670,26 @@ export function LinkedInDeepDiveContent() {
           )}
         </DialogContent>
       </Dialog>
+      <DemoRestrictionDialog
+        open={showRequestAccess}
+        onOpenChange={setShowRequestAccess}
+        title="Request access to upload analytics"
+        description="You're in demo mode. To upload LinkedIn screenshots and get AI-powered insights, request access. Share your details and we'll get you set up."
+      />
 
-      <Button
-        aria-label="Open LinkedIn Analytics Assistant"
-        onClick={() => setChatOpen(true)}
-        className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full shadow-lg"
-        style={{ backgroundColor: LINKEDIN_BLUE }}
-      >
-        <Bot className="h-7 w-7 text-white" strokeWidth={2} />
-      </Button>
-      <AnalyticsChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+      {!isMember && (
+        <>
+          <Button
+            aria-label="Open LinkedIn Analytics Assistant"
+            onClick={() => setChatOpen(true)}
+            className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full shadow-lg"
+            style={{ backgroundColor: LINKEDIN_BLUE }}
+          >
+            <Bot className="h-7 w-7 text-white" strokeWidth={2} />
+          </Button>
+          <AnalyticsChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+        </>
+      )}
     </div>
     </AnalyticsChatProvider>
   );
