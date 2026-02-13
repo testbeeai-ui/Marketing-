@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 import { useOrganization } from "@/lib/contexts/OrganizationContext";
 import { useQuery } from "@tanstack/react-query";
 import { approvalsApi } from "@/lib/api";
+import { PUBLIC_DEMO_ORGANIZATION_ID } from "@/lib/constants";
 
 const ANALYTICS_OPTIONS = [
   { label: "Overall", href: "/storyteller", icon: LayoutDashboard },
@@ -62,8 +63,12 @@ const MAIN_NAV_ITEMS = [
 export const Navbar = () => {
   const { theme, setTheme } = useTheme();
   const { demoMode, toggleDemoMode } = useDemoMode();
-  const { activeOrganization, isDemoMode } = useOrganization();
+  const { activeOrganization, isDemoMode, loading } = useOrganization();
   const router = useRouter();
+
+  const isMemberInNonDemoOrg =
+    activeOrganization?.role === "member" &&
+    activeOrganization?.id !== PUBLIC_DEMO_ORGANIZATION_ID;
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<{ email?: string } | null>(null);
@@ -89,7 +94,6 @@ export const Navbar = () => {
 
   const pendingApprovalsCount = pendingApprovalsData?.approvals?.length || 0;
 
-  const isMember = activeOrganization?.role === "member";
 
   const generateLocalAvatar = (email: string | undefined): string => {
     if (!email) return '';
@@ -160,9 +164,9 @@ export const Navbar = () => {
         <motion.div
           className="flex items-center gap-3 cursor-pointer group"
           whileHover={{ scale: 1.02 }}
-          onClick={() => router.push(isMember && !isDemoMode ? '/storyteller' : isDemoMode ? '/workspace' : '/dashboard')}
+          onClick={() => router.push(loading || isMemberInNonDemoOrg ? '/storyteller' : isDemoMode ? '/workspace' : '/dashboard')}
           role="button"
-          aria-label={isMember && !isDemoMode ? "Go to Analytics" : isDemoMode ? "Go to Workspace" : "Go to Dashboard"}
+          aria-label={loading || isMemberInNonDemoOrg ? "Go to Analytics" : isDemoMode ? "Go to Workspace" : "Go to Dashboard"}
         >
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:shadow-violet-500/40 transition-shadow">
             <Sparkles className="w-5 h-5 text-white" />
@@ -179,7 +183,7 @@ export const Navbar = () => {
         <div className="hidden md:flex items-center gap-1 flex-1 justify-center px-8">
           {MAIN_NAV_ITEMS.filter((item) => {
             if (isDemoMode) return item.label !== "Dashboard"; // Demo users never see Dashboard; Workspace is their main page
-            if (isMember && !isDemoMode) {
+            if (loading || isMemberInNonDemoOrg) {
               return item.label === "Analytics" || item.label === "Approvals";
             }
             return true;
@@ -343,7 +347,7 @@ export const Navbar = () => {
                   <DropdownMenuSeparator />
                 </>
               )}
-              {!isMember && !isDemoMode && (
+              {!isMemberInNonDemoOrg && !isDemoMode && (
                 <DropdownMenuItem onClick={() => router.push('/dashboard')} className="cursor-pointer">
                   <LayoutDashboard className="w-4 h-4 mr-2" />
                   Dashboard
@@ -353,7 +357,7 @@ export const Navbar = () => {
                 <BarChart3 className="w-4 h-4 mr-2" />
                 Analytics Hub
               </DropdownMenuItem>
-              {!isMember && (
+              {!isMemberInNonDemoOrg && (
                 <DropdownMenuItem onClick={() => router.push('/style-profile')} className="cursor-pointer">
                   <UserCog className="w-4 h-4 mr-2" />
                   Style Profile
